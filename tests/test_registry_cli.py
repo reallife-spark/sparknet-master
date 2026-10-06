@@ -7,34 +7,8 @@ function; the heavy enforcement is already in the schema and in authz itself.
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
-from pathlib import Path
-
-import pytest
-
-ROLE_ROOT = Path(__file__).resolve().parent.parent
-FABRIC_ROOT = ROLE_ROOT.parent
-STATE_DIR = None
-
-def _state_dir() -> Path:
-    global STATE_DIR
-    if STATE_DIR is not None:
-        return STATE_DIR
-    probe = subprocess.run(
-        ["bash", "-c",
-         f'. "{ROLE_ROOT}/scripts/sparknet-master-env.sh" >/dev/null && printf "%s" "$SPARKNET_STATE_DIR"'],
-        capture_output=True, text=True, check=True,
-        env={**os.environ, "HOME": os.environ.get("HOME", "/nonexistent")},
-    )
-    STATE_DIR = Path(probe.stdout.strip())
-    return STATE_DIR
-
 import os
-import os
-import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -73,9 +47,9 @@ def test_authz_sign_produces_valid_entry(tmp_path):
         "requested_capabilities": ["telemetry"],
     }))
     out = tmp_path / "e.json"
-    res = subprocess.run(
+    subprocess.run(
         ["make", "-C", str(ROLE_ROOT), "authz-sign",
-         f"IDENTITY={ident}", f"CAPS=telemetry", f"OUT={out}"],
+         f"IDENTITY={ident}", "CAPS=telemetry", f"OUT={out}"],
         capture_output=True, text=True, check=True,
     )
     assert out.is_file()
@@ -94,7 +68,7 @@ def test_registry_verify_ok(tmp_path):
     }))
     ent = tmp_path / "e.json"
     subprocess.run(["make", "-C", str(ROLE_ROOT), "authz-sign",
-                    f"IDENTITY={ident}", f"CAPS=telemetry", f"OUT={ent}"],
+                    f"IDENTITY={ident}", "CAPS=telemetry", f"OUT={ent}"],
                    check=True, capture_output=True)
     reg = tmp_path / "r.json"
     reg.write_text(json.dumps({
@@ -118,7 +92,7 @@ def test_wg_render_limits_to_32(tmp_path):
     }))
     ent = tmp_path / "e.json"
     subprocess.run(["make", "-C", str(ROLE_ROOT), "authz-sign",
-                    f"IDENTITY={ident}", f"CAPS=telemetry", f"OUT={ent}"],
+                    f"IDENTITY={ident}", "CAPS=telemetry", f"OUT={ent}"],
                    check=True, capture_output=True)
     reg = tmp_path / "r.json"
     reg.write_text(json.dumps({

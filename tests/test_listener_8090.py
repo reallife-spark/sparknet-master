@@ -1,7 +1,6 @@
 """Step 7: 8090 listener constraints."""
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent

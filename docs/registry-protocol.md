@@ -1,9 +1,21 @@
 # Registry protocol
 
-**Status: specified, not built (Step 2).**
+**Status: partially built (Steps 3 and 6; Step 2 reopened 2026-10-06).**
 
-This document describes the registry format the Master will emit and peers will
-consume. It is written before the CLI exists so the contract cannot drift.
+This document describes the registry format the Master emits and peers consume.
+It was written before the CLI existed so the contract could not drift, and the
+CLI that arrived in Step 3 now emits and verifies it (`scripts/sparknet-registry-*.sh`).
+Two things are still open and are recorded here rather than smoothed over:
+
+- **The distribution channel is unspecified.** `make registry-publish` emits the
+  signed document; how it reaches a peer is Step 6's decision and has not been
+  made — `contracts/identity-schema.json` carries `distribution: UNSPECIFIED` on
+  purpose.
+- **The field set below disagrees with `shared/sparknet-authz.py`.** The schema
+  in `../manifests/registry.schema.json` and this page name the entry
+  signature field `signature`; `sign_authorization` emits and verifies
+  `signature_b64`, and nothing loads the schema. Which shape is canonical is an
+  open contract decision (Step 2), not a typo to fix in one place.
 
 ## Registry shape
 

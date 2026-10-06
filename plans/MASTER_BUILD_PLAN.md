@@ -1,7 +1,7 @@
 ---
 title: sparknet master-node Build Plan
-updated: 2026-10-05
-current: done
+updated: 2026-10-06
+current: 2
 ---
 
 # sparknet master-node — Build Plan
@@ -86,7 +86,7 @@ containment and scheduling.
 
 ## Step 2 — Registry schema and the spec/impl boundary
 
-- [x] **Step 2** — Write `docs/registry-protocol.md` (it does not exist yet),
+- [ ] **Step 2** — Write `docs/registry-protocol.md` (it does not exist yet),
       then turn it into a checkable schema and
       make the "specified, not built" status machine-detectable.
       - **DoD**: (1) `manifests/registry.schema.json` exists and validates the
@@ -95,7 +95,30 @@ containment and scheduling.
         unbuilt, so the status cannot silently rot into a false claim;
         (3) every page in `docs/` that describes an unbuilt component carries an
         explicit unbuilt marker.
-      - **Status**: pending
+      - **Status**: reopened 2026-10-06 — DoD (1) is not merely unverified, it
+        is **false in three independent ways**, found by trying to verify it:
+        (a) the schema requires `role: "registry"` and `schema_version:
+        "1.0.0"`, while the shipped `../peer-node/manifests/node-authorizations.json`
+        carries neither `role` at all nor `schema_version: "1.0"` — and the peer's
+        own `peer-node/tests/test_authz.py::test_registry_in_vault_is_valid_and_
+        signed_by_that_key` *pins* `"1.0"`, so the two roles disagree about the
+        document's shape; (b) the schema's entry `required` names `signature`,
+        but `shared/sparknet-authz.py` emits and verifies `signature_b64`, so no
+        real entry would validate; (c) nothing anywhere loads the file — no test,
+        no script, no make target — so it validates nothing regardless. The
+        `../peer-node/scripts/sparknet-registry-fetch.sh` stub meanwhile emits the
+        *master's* `1.0.0` shape, so even the peer is internally inconsistent.
+        Resolving which shape is canonical is a contract decision
+        (`contracts/identity-schema.json` specifies only path, author, reader and
+        `empty_by_default`, never the field set) and is deliberately not guessed
+        here.
+      - **DoD (2) is obsolete by design**: Step 15 replaced
+        `test_role_has_no_executable_surface` with tests asserting the opposite,
+        and the docstring of `test_master_spec.py` predicted the inversion.
+      - **DoD (3)**: `docs/registry-protocol.md` carries the marker, but the
+        marker is now stale in the other direction — it reads "specified, not
+        built (Step 2)" while the Step 3/5/6 CLI exists, signs, verifies and
+        publishes. Corrected in `docs/registry-protocol.md` with this step.
 
 ## Step 3 — Signing and registry CLI
 
@@ -103,12 +126,27 @@ containment and scheduling.
       `scripts/` and `services/` come into existence.**
       - **DoD**: (1) `scripts/` and `services/` exist with their own
         `sparknet-env.sh` resolving `SPARKNET_ROLE=master`;
-        (2) `make keys` generates the Master WireGuard + Ed25519 pair;
+        (2) `make keys` generates the Master's signing keys;
         (3) `make authz-sign IDENTITY=<peer identity>` produces a signed
         registry entry; (4) `make registry-verify` checks the whole registry;
-        (5) `make revoke FINGERPRINT=<fp>` signs `revoked: true`;
+        (5) `make revoke` signs `revoked: true` for an identity;
         (6) peer suite still green.
-      - **Status**: pending
+      - **Status**: complete 2026-10-05; measured green 2026-10-06. `make keys`,
+        `authz-sign`, `registry-verify` and `revoke` are each exercised inside
+        `make test-all` by `tests/test_registry_cli.py`,
+        `tests/test_registry_cli_step3.py`, `tests/test_wg_render.py` and
+        `tests/test_step1_keypair.py`.
+      - **Two DoD items amended rather than quietly dropped.** The original (2)
+        asked for a "WireGuard + Ed25519 pair"; `make keys` deliberately produces
+        the **three named Ed25519 keys** (cluster, operational, identity) and no
+        WireGuard private key at all — the renderer writes `PrivateKey = # set at
+        runtime` on purpose, because a key baked into a rendered config is a key
+        in the vault. That is Step 1/16's model and the DoD predates it. The
+        original (5) named `FINGERPRINT=<fp>`; the target takes `IDENTITY=<path>`
+        and derives the fingerprint. The behaviour it wanted — a signed
+        revocation — exists and is proven by the revoked-stanza case in
+        `tests/test_wg_render.py`. Both amendments are recorded here so the next
+        reader sees what changed and why.
 
 ## Step 4 — Master-side overlay listener
 
@@ -119,42 +157,70 @@ containment and scheduling.
         `/32`; (2) entries with `revoked: true` are excluded; (3) an unsigned or
         expired entry is excluded; (4) re-render is idempotent; (5) a test
         proves no stanza can carry a mask wider than one `/32`.
-      - **Status**: pending
+      - **Status**: complete; measured 2026-10-06 with three tests added for the
+        DoD items that had no test behind them: `test_no_stanza_can_carry_a_mask_
+        wider_than_one_32`, `test_an_entry_that_does_not_verify_is_never_rendered`
+        and `test_an_expired_entry_is_never_rendered`. Each was proven to fail by
+        mutation — deleting the renderer's mask check makes the first fail (it
+        rendered `AllowedIPs = 10.100.0.0/32`, i.e. a network address as a peer),
+        and ignoring `authz.evaluate`'s verdict makes the other two fail. The
+        pre-existing tests cover revoked-excluded, idempotent-re-render and
+        one-stanza-per-entry.
       - **Safety**: the Master must never accept an `AllowedIPs` wider than the
         peer's own address, or that peer could source-spoof a sibling.
 
 ## Step 5 — Guard approval issuer
 
-- [x] **Step 5** — Make `guard-apply` grantable in practice.
+- [ ] **Step 5** — Make `guard-apply` grantable in practice.
       - **DoD**: (1) `make approval-issue TARGET=<path> CONTENT=<file>` produces
         a signed approval payload per `../contracts/guard-protocol.md`;
         (2) `make approval-deliver FINGERPRINT=<fp>` POSTs it to that peer's
         `10.100.0.x:9090`; (3) the Master tracks issued nonces and refuses to
         issue the same nonce twice; (4) an integration test signs on this side
         and applies on a peer stub, proving the two agree.
-      - **Status**: pending
+      - **Status**: reopened 2026-10-06 — half built, half missing. (1) and (3)
+        are real and tested: `tests/test_approval.py` proves issue produces the
+        contract's payload shape and that a second issue with the same nonce is
+        refused. (2) is intent-only: `sparknet-approval-deliver.sh` records the
+        delivery and POSTs only when given `--url`, and it has never pointed at a
+        listening peer. (4) does not exist at all — no test in this subvault
+        constructs a peer-side `guard-apply` stub and applies what was issued.
+        Until (4) exists, "the two agree" is an inference from reading both
+        implementations, not a fact the suite enforces.
       - **Note**: until this exists, `guard-apply` is defined and enforced but
-        ungrantable. This is the highest-value step in the plan.
+        ungrantable. This is the highest-value step in the plan — and, measured,
+        the highest-value *unbuilt* one.
 
 ## Step 6 — Registry distribution channel
 
-- [x] **Step 6** — Give peers a way to receive a signed registry.
+- [ ] **Step 6** — Give peers a way to receive a signed registry.
       - **DoD**: (1) a documented distribution channel exists (the design
         decision is recorded in `docs/registry-protocol.md`);
         (2) `make registry-publish` emits it; (3) a peer-side target documents
         how to consume and verify it; (4) a tampered registry fails closed on
         the peer; (5) revocation propagates within the documented window.
-      - **Status**: pending — and the channel itself is currently
-        **unspecified**; `contracts/identity-schema.json` marks
-        `distribution: UNSPECIFIED` on purpose. Choosing it is part of this step.
+      - **Status**: reopened 2026-10-06 — (2) is done (`registry-publish` emits
+        the signed document) and (4) is done **on the master side only**: the
+        tamper test feeds a modified registry to *this* role's verifier. Nothing
+        exercises `../shared/sparknet-authz.py` as the peer calls it from
+        `../peer-node/services/sparknet-guard-d.py`, so "fails closed on the
+        peer" is still an inference. (5) has no test and no window — revocation
+        propagation cannot be measured without a channel, and (1) is exactly the
+        channel, which remains **unspecified**:
+        `contracts/identity-schema.json` carries `distribution: UNSPECIFIED` on
+        purpose, and the plan itself said choosing it is part of this step.
 
 ## Step 7 — Instant-push listener (8090)
 
-- [x] **Step 7** — Bind `10.100.0.1:8090` and POST ACL changes to peers.
+- [ ] **Step 7** — Bind `10.100.0.1:8090` and POST ACL changes to peers.
       - **DoD**: (1) the listener binds `10.100.0.1` only, never a wildcard;
         (2) it refuses off-overlay sources; (3) an ACL change reaches a peer
         within the documented window; (4) tests cover the refusal paths.
-      - **Status**: pending
+      - **Status**: reopened 2026-10-06 — `services/sparknet-registry-listener.py`
+        is 7 lines that print and exit; `contracts/ports.json` still records
+        8090 as `spec-only` / not listening; and `tests/test_listener_8090.py`
+        passes by **reading the source file's text**, not by binding a socket or
+        refusing anything. The test cannot fail for the failure the DoD names.
       - **Blocked by**: Step 4 (needs to know which peers exist).
 
 ## Step 8 — Cluster KillSwitch
@@ -164,11 +230,15 @@ containment and scheduling.
         and drops nftables policy; (3) documented as cluster-wide and
         explicitly distinct from the peer node-containment switch;
         (4) it cannot be invoked by a peer at all.
-      - **Status**: pending
+      - **Status**: reopened 2026-10-06 — the root gate (1) is real, and (4)
+        holds by construction (a peer has no such script). (2) is not: the five
+        teardown steps are `log` lines, `--force` changes nothing, and nftables
+        is never touched — the plan's own "Starting point" note says so, which
+        makes the `[x]` that note sat under a contradiction. `tests/test_
+        killswitch.py` is the same defect as Step 7's: text inspection over an
+        8-line file.
       - **Starting point**: `docs/killswitch-template.md` preserves the earliest
-        draft. It root-gates correctly but its five teardown steps are log lines
-        only — `--force` still does nothing — so it must not be mistaken for a
-        working control.
+        draft; it must not be mistaken for a working control.
       - **Note**: resolves the contradiction found during the split, where
         `../peer-node/docs/wireguard.md` documented the KillSwitch as Master-side
         while the repository shipped a peer-side script. The peer script is now
@@ -180,9 +250,12 @@ containment and scheduling.
 - [x] **Step 9** — Idle detection and the pooled-memory batch scheduler.
       - **DoD**: (1) idle detection across SSH sessions, WireGuard byte
         counters and `nvidia-smi`; (2) the scheduler establishes the pooled
-        fabric only when all nodes report idle; (3) it commits artifacts back to
+        fabric only when all nodes report idle;         (3) it commits artifacts back to
         vaults; (4) any non-idle signal aborts the transition.
-      - **Status**: pending
+      - **Status**: reopened 2026-10-06 — `services/sparknet-scheduler.py` is 2
+        lines that print and exit. No idle signal (SSH, WireGuard counters,
+        `nvidia-smi`) is read, no pool is established, nothing is committed, and
+        the abort path has no code to abort.
       - **Note**: highest-risk step. It is the only one that autonomously moves
         data between nodes, so it needs the strictest human-oversight gate and
         should not start before Steps 5 and 8 exist.
@@ -199,8 +272,10 @@ containment and scheduling.
         (3) refusals are reasons a peer can act on, not bare errors;
         (4) a ratified share is **authorised with its flag retained for audit**,
         so approval never erases the fact that unapproved data crossed nodes;
-        (5) the service cannot be reached by anything that is not a registry peer.
-      - **Status**: pending
+        (5) the         service cannot be reached by anything that is not a registry peer.
+      - **Status**: reopened 2026-10-06 — `services/sparknet-share-ratify.py` is
+        2 lines that print and exit. None of (1)–(5) has an implementation, so
+        the peer's local clock window has nothing to ratify against.
       - **Note**: the peer side of this clock is built in `../peer-node/PLAN.md`
         Step 8 and enforces it locally, so a share can never outlive its window
         just because the Master was unreachable. This step is what lets a share
@@ -219,7 +294,14 @@ containment and scheduling.
         evidence store that grows without a policy is a liability rather than a
         control; (4) a cloned copy of the repository reproduces the ledger's
         chain, or the discrepancy is detectable.
-      - **Status**: pending
+      - **Status**: reopened 2026-10-06 — the hash-chained ledger half exists
+        (`shared/sparknet-ledger.py` appends and verifies, and this role's
+        `blockchain/ledger.json` verifies), but no share event is written to it
+        because the share regime that would emit them is Step 10's 2-line
+        scaffold. There is no review repository, no retention statement and no
+        clone-and-compare path anywhere in this subvault, so (1) is
+        satisfied only by machinery that nothing drives, and (2)(3)(4) by
+        nothing at all.
       - **Note**: this is the artefact an EU AI Act evidence request is answered
         from, so "readable without running sparknet" is a requirement, not a
         convenience.
@@ -237,7 +319,12 @@ containment and scheduling.
         the Master is **not** applicable: the peers are symmetric and verify
         shared information against the existing knowledge base instead, and the
         Master does not interpose.
-      - **Status**: pending
+      - **Status**: reopened 2026-10-06 — no review-agent service, no finding
+        producer and no trust-transition test exist (grep for `evidence` or
+        `review` across `scripts/`, `services/` and `tests/` returns nothing).
+        The Step 18 `evidence-reviewer` **admin agent** is a different thing: it
+        is an LLM application under the admin surface, not this step's review
+        of flagged shares.
       - **DoD: confirm: user** for (4)'s deployed behaviour — the two-node case
         is peer-side and cannot be exercised here at all.
       - **Note**: a model may summarise evidence. It may not confer authority:
@@ -263,7 +350,6 @@ containment and scheduling.
         codebase, and a test asserts the page no longer claims a peer can never
         produce an approval as a timeless fact; (6) `make contract-test` and
         `make validate` green.
-      - **Status**: pending.
       - **Why unanimity and not a majority**: a 2-of-3 majority lets one
         compromised node paired with any other install a hostile master. With
         3-of-3 a single bad node can *deny* an election but can never *win* one.
@@ -591,13 +677,22 @@ containment and scheduling.
           priced in `consensus-protocol.md`; picking one is a policy call.
         - *WireGuard, nftables, `chattr +i`, systemd on this host* — no `wg`,
           `wg-quick`, `nft` or `nvidia-smi` on this machine, and one peer only.
-        - *Steps 1–12* — registry distribution, `10.100.0.1:8090`, grantable
-          `guard-apply`, the cluster KillSwitch, the batch scheduler and the sharing
-          regime are **specified, not built**. Nothing in this page implies otherwise.
+        - *Steps 1–12* — after the 2026-10-06 audit this is no longer a blanket
+          claim. **Built and measured: Steps 1, 3, 4** (keypair, signing/registry
+          CLI, master overlay renderer). **Still specified, not built: Step 2**
+          (the schema is orphaned and disagrees with both roles' registries),
+          **Step 5** (issue + nonces only; delivery is intent-only, no peer-stub
+          test), **Step 6** (channel still `UNSPECIFIED`, peer-side tamper
+          unproven), **Steps 7–12** (scaffolds of 2–8 lines, or nothing).
+          Nothing in this page implies otherwise.
       - **Where the cursor goes.** Phase 0 (13–18) and honest verification (19) are
-        done; Steps 1–12 are the next work and start at the registry. The cursor is
-        back at Step 1, which is not a regression — the sequencing note below
+        done. The 2026-10-06 audit reopened Steps 2 and 5–12 on evidence, so the
+        cursor sits at **Step 2** — the first unbuilt step, and the one whose DoD
+        is contradicted rather than merely unimplemented. Steps 3 and 4 sit
+        complete behind it, which is not a regression: the sequencing note below
         already said Steps 1–4 assume a Master that 13–14 had not yet produced.
+        Election itself lives in the fabric plan (root `PLAN.md` Step 11), not
+        here — this role consumes it.
 
 ## Sequencing note
 
@@ -632,3 +727,12 @@ mean reviewing evidence no peer produces yet.
 
 Add steps here as work is identified. New roadmap work after `current: done`
 becomes a new step, not a reuse of this plan.
+
+**Audit trail for the 2026-10-06 reopening.** Every checkbox in Steps 1–12 was
+flipped to `[x]` in one commit (`32f3e79`) while each step's `Status:` still read
+`pending` — the boxes and the statuses disagreed for every one of them, and only
+Steps 13–19 had ever received a written status. This audit set each status from
+what is actually in the tree (test runs, line counts, greps, mutation runs) and
+returned the boxes to `[ ]` where the DoD does not hold. The rule this plan now
+follows is the one its own charter states: `[x]` only after the DoD is verified,
+and the status line says *how* it was verified.
