@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "contract": "identity-schema",
+  "description": "Cluster trust root. Three members co-sign this; only a root with three valid signatures from three distinct members it names itself authorises the operational key it binds. Canonical form and acceptance rules: contracts/consensus-protocol.md and identity-schema.json `cluster_trust_root`.",
+  "empty_by_default": true,
+  "empty_by_default_rationale": "There is no master until three nodes agree. A root with one or two signatures is not a partial success — it authorises nothing, so shipping this file empty means a fresh deployment has no master and no way to sign anything. That is the fail-closed default, same as the peer registry.",
+  "what_this_is_not": [
+    "not a majority decision — three of three, deliberately",
+    "not threshold cryptography — three ordinary Ed25519 signatures over identical canonical bytes",
+    "not a configuration file — this is a signed agreement, and editing it invalidates all three signatures"
+  ],
+  "root": null,
+  "root_template": {
+    "version": "1.0",
+    "nonce": "UNIQUE_PER_ROOT — a re-formed root needs a new nonce so the previous one cannot be replayed",
+    "formed_at": "ISO8601",
+    "members": [
+      {
+        "node_id": "REPLACE",
+        "fingerprint": "REPLACE — sha256 of the projected identity",
+        "wireguard_pubkey": "REPLACE",
+        "cluster_pubkey": "REPLACE"
+      },
+      {
+        "node_id": "REPLACE",
+        "fingerprint": "REPLACE",
+        "wireguard_pubkey": "REPLACE",
+        "cluster_pubkey": "REPLACE"
+      },
+      {
+        "node_id": "REPLACE",
+        "fingerprint": "REPLACE",
+        "wireguard_pubkey": "REPLACE",
+        "cluster_pubkey": "REPLACE"
+      }
+    ],
+    "master_node_id": "REPLACE — must be one of the three members",
+    "master_pubkey": "REPLACE — the operational public key this root authorises",
+    "signatures": {
+      "REPLACE_node_id": "REPLACE — all three, or the root authorises nothing"
+    }
+  },
+  "verification": {
+    "command": "sparknet-consensus verify-root manifests/cluster-trust-root.json",
+    "requires": [
+      "exactly three members, all distinct node_ids",
+      "three signatures, from three distinct members the root itself names",
+      "each signature valid against that member's cluster_pubkey as stated in the root",
+      "master_node_id is one of the three members",
+      "a nonce not already in force, so a re-formed root supersedes rather than merges"
+    ],
+    "never_verified_here": "Whether any root is actually valid on a live cluster. No three-node cluster exists on the development host."
+  }
+}

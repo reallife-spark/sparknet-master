@@ -1,0 +1,16 @@
+# Hash-chained ledger maintenance for the elected Master.
+#
+# Records the agreement events a peer cannot observe: elections, trust-root
+# formation, re-formation, and every signature the signer produced.
+[Unit]
+Description=Sparknet master ledger
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h
+ExecStart=/usr/bin/env python3 %h/services/sparknet-ledger.py verify
+
+[Install]
+WantedBy=multi-user.target

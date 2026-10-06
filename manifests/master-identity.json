@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "contract": "identity-schema",
+  "purpose": "The Master role's own identity: which node this role runs as, where it sits on the overlay, and what it holds. This is a description of the ROLE, not a grant of authority. Read the election block before concluding this node is Master.",
+  "node_id": "REPLACE_WITH_NODE_ID",
+  "role": "peer",
+  "role_note": "'peer' is deliberate and load-bearing, and it contradicts Step 1 of the build plan, which asked for 'role: master' here. Step 1 predates Step 13. Under the elected model a Master IS a peer that won a unanimous election, so the identity on disk says peer and carries no claim to authority; contracts/consensus-protocol.md decides who is Master, and no manifest, directory name or bundle destination may decide it. tests/test_contracts.py::test_a_node_declares_itself_peer_until_it_is_elected fails this file if it drifts to 'master'. What 'master' names here is the ROLE this subvault implements \u2014 the node that signs \u2014 and that is recorded in role_implemented_by rather than in the identity.",
+  "role_implemented_by": "master-node \u2014 the subvault implementing the signing role. A description of scope, not a grant.",
+  "wireguard_public_key_b64": "REPLACE_WITH_NODE_WG_PUBLIC_KEY",
+  "overlay_ipv4": "10.100.0.1/32",
+  "overlay_note": "10.100.0.1 is the Master's anchor address in contracts/overlay.json. It is reserved for the signing role and no peer may take it.",
+  "cluster_pubkey_b64": "REPLACE_WITH_OWN_CLUSTER_PUBLIC_KEY",
+  "requested_capabilities": [
+    "telemetry",
+    "p2p-sync",
+    "push-receive",
+    "cluster-vote"
+  ],
+  "capabilities_note": "The same vocabulary a peer holds. The Master's powers are NOT in this list \u2014 cluster-vote is a say, not a grant, and signing comes from key possession rather than from a capability any manifest can confer. See ../contracts/capabilities.json.",
+  "operational_key": {
+    "held": "only when an elected cluster trust root names this node",
+    "generated_to": "$SPARKNET_STATE_DIR/keys/operational.ed25519",
+    "generated_mode": "0600",
+    "path_never_committed": true,
+    "public_half_published_to": "the elected cluster trust root's master_pubkey, which is where peers read it from",
+    "note": "Generating this key does not make this node Master, and this file does not record that it was generated. Step 1 of the build plan lands the keypair; election lands the authority. See ../contracts/consensus-protocol.md and security/key-management.md."
+  },
+  "election": {
+    "eligible": true,
+    "elects_itself": false,
+    "threshold": "3 of 3 cluster signatures",
+    "elects_itself_note": "A node may vote for itself. It may not install itself: that needs three distinct members' signatures on a cluster trust root naming this node's operational public key. Nothing on disk can shortcut this.",
+    "authority_path": "$SPARKNET_STATE_DIR/trust-root.json -> verified by services/sparknet-signer.py at start -> its root_id is recorded in every signature this node ever issues"
+  }
+}

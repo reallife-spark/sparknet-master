@@ -1,0 +1,58 @@
+# The Master's admin surface, as committed config.
+#
+# This file exists so the admin page survives a redeploy. Panel customisations made
+# by clicking do not, and a surface that only exists in a database is a surface
+# nobody can review — which is the wrong property for the one place an injection
+# would do the most damage.
+#
+# NOT DEPLOYED. Open WebUI is not installed on this host and no overlay interface
+# exists, so nothing here binds. What is verified is that the topology is coherent
+# and that the surface carries no signing capability: see
+# ../../manifests/admin-surface.json and ../../tests/test_admin_surface.py.
+#
+# The single rule this file exists to enforce: `sign` is not obtainable from
+# anything reachable in this compose file. The operational key is not mounted, the
+# signer socket is not mounted, and the only thing the surface can do about a
+# signature is ask for one.
+name: sparknet-admin-surface
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: sparknet-admin-webui
+    restart: unless-stopped
+    # Bound to the overlay address, never 0.0.0.0.
+    #
+    # The Master is the one role that must not inherit the peer's egress rule
+    # (which pins traffic to 10.100.0.1 and would blackhole the fabric). Overlay-only
+    # *binding* is the opposite move and does not contradict that: this is about
+    # who may reach the page, not what the page may reach.
+    ports:
+      - "10.100.0.1:8080:8080"
+    environment:
+      # The vault is the only knowledge base. Open WebUI's own vector store would
+      # be a second one that no signed entry can revoke, which makes it the quieter
+      # way to lose control of what the fabric knows.
+      RAG_INGESTION_ENABLED: "false"
+      WEBUI_AUTH: "true"
+      # The admin surface is multi-user. This is precisely why the signing key is
+      # not here and never will be.
+      ENABLE_SIGNUP: "false"
+      # No model is named. Which model serves this surface is an unmade decision,
+      # and MASTERSPIKE-manifest.json deliberately does not pretend otherwise.
+    volumes:
+      - open-webui-data:/app/backend/data
+      # Read-only. The surface reads the vault; it does not get to rewrite the
+      # contract or the plan through a bind mount.
+      - ../..:/workspace/sparknet:ro
+    # No signer socket, no $SPARKNET_STATE_DIR, no key material. If a future edit
+    # adds one, the test that reads ../manifests/admin-surface.json should fail —
+    # and if it does not, that test is the defect, not the edit.
+
+  # The opencode terminal has no listener of its own: an operator reaches it over
+  # the overlay with their own client, and it reads ../opencode.json. It is listed
+  # here so the surface has one obvious place to be configured, not because a
+  # container is needed to run a terminal.
+
+volumes:
+  open-webui-data:

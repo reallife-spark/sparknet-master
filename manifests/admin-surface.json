@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "contract": "admin-surface",
+  "description": "The elected Master's administrative surface: what an admin may reach, and — the part that matters — what it may not. Read by master-node/tests/test_admin_surface.py, which fails the build if anything here grows a signing capability.",
+  "authored": "2026-10-05",
+
+  "capabilities": {
+    "granted": [
+      "telemetry",
+      "vault-read",
+      "vault-write",
+      "dispatch-bridge",
+      "guard-inspect",
+      "registry-draft"
+    ],
+    "explicitly_not_granted": ["sign"],
+    "why": "The admin surface is multi-user and LLM-driven: it reads configuration as input and a prompt injection there is a normal Tuesday. The operational key grants everything the peer roles deliberately withhold, so a signer reachable from here inverts the fabric's central thesis. Isolation here is structural — a separate process, a separate filesystem scope and a unix socket — and this file records the intent that a test then checks, rather than trusting a prose promise or a deny rule."
+  },
+
+  "signing_boundary": {
+    "signer_service": "master-node/services/sparknet-signer.py",
+    "signer_unit": "sparknet-master-signer.service",
+    "transport": "unix socket, mode 0600, inside $SPARKNET_STATE_DIR/signer/",
+    "reached_from_here": false,
+    "how_signatures_actually_happen": "An admin agent composes a *request* — a typed registry entry or a guard approval naming one peer, one path, one action — and hands it to an operator or to the signer's own unit. The signer re-derives the canonical bytes itself, binds them to the trust root it was started with, refuses anything else, and appends the outcome to the ledger. The admin surface never holds a key, so the worst it can do is ask; what happens to the ask is decided somewhere it cannot see.",
+    "why_not_just_block_the_capability": "A deny rule governs a process that may later ignore it. The capability list here is a second, independent statement of the same boundary — the signer is the thing that enforces it, and this file is the thing that keeps the two in agreement."
+  },
+
+  "agents": {
+    "directory": "master-node/.opencode/agents/",
+    "role_scoped": true,
+    "role_scoped_why": "These agents are admin-geared and must not be offered on a peer session. opencode resolves the nearest .opencode/agents/, so a file here is visible to a session started in this role and invisible to one started in peer-node/.",
+    "expected": [
+      {
+        "file": "cluster-admin.md",
+        "name": "cluster-admin",
+        "purpose": "Cluster administration: membership, overlay, election state, key custody posture."
+      },
+      {
+        "file": "registry-keeper.md",
+        "name": "registry-keeper",
+        "purpose": "Registry keeping: draft, review and retire authorization entries. Drafts requests; never signs them."
+      },
+      {
+        "file": "evidence-reviewer.md",
+        "name": "evidence-reviewer",
+        "purpose": "Evidence review: judge submissions and share attestations against the contract, and rule on what the ledger already records."
+      }
+    ]
+  },
+
+  "page": {
+    "reachable_at": "http://10.100.0.1:8080/",
+    "overlay_only": true,
+    "binds_to": "10.100.0.1",
+    "never_binds_to": "0.0.0.0",
+    "why_overlay_only": "The admin page is the surface most worth attacking and the one with the most to lose, so it is reachable only from inside the overlay. The Master is the one role that must never inherit the peer's egress restriction — which pins traffic to 10.100.0.1 — because adopting it here would blackhole the fabric. Overlay-only binding is the opposite move and is not a contradiction: this is about who may *reach the page*, not about what the page may reach.",
+    "components": [
+      {
+        "name": "open-webui",
+        "role": "the multi-user chat surface, where the injection risk actually lives",
+        "config": "master-node/configs/admin-surface/docker-compose.admin.yml",
+        "bind": "10.100.0.1:8080:8080"
+      },
+      {
+        "name": "opencode-terminal",
+        "role": "a terminal into this role's vault and build plan, for the operator who is actually administering",
+        "config": "master-node/configs/admin-surface/opencode.json",
+        "bind": "reached over the overlay via the operator's own client; no listener of its own"
+      }
+    ],
+    "open_webui_settings": {
+      "RAG_INGESTION_ENABLED": "false",
+      "why": "Open WebUI's own vector store would become a second, grant-less knowledge base. The vault is the only knowledge base; a parallel one cannot be revoked with a signed entry, which makes it the quieter way to lose control of what the fabric knows."
+    }
+  },
+
+  "not_built_yet": "This is a declaration, not a deployment. Open WebUI is not installed on this host, no overlay interface exists, and nothing binds 8080. `contracts/ports.json` records the port as `provisioned` with `runtime: not-verifiable-here`, and Step 18's DoD (3) reachability is `DoD: confirm: user`. The isolation assertions in test_admin_surface.py are read off this file and are therefore only as strong as the file — they prove the declared topology is coherent, not that a real deployment held."
+}

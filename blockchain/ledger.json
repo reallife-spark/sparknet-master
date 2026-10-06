@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "description": "Permissioned ledger, Ed25519 signed and hash-chained. Same schema as the peer's (peer-node/blockchain/ledger.schema.json is normative and is not duplicated here). On the elected Master it records agreement events a peer cannot observe: elections, trust-root formation, re-formation, and every signature the signer produced.",
+  "genesis_hash": "",
+  "blocks": []
+}

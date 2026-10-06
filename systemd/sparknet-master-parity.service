@@ -1,0 +1,19 @@
+# Confirms at boot that this role can still load the peer's services by path.
+#
+# This is the unit that makes master-node/services/ "wired": parity is the one
+# thing this role does that fails *silently* if it stops being true. A guard that
+# cannot load is loud; a master quietly running a stale copy of the peer is not.
+[Unit]
+Description=Sparknet master parity check (peer services loaded by path)
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-%h/.env
+ExecStart=/usr/bin/env python3 %h/services/sparknet-parity.py
+# Fails the unit rather than warning, so a drifted copy is visible in `systemctl`.
+SuccessExitStatus=0
+
+[Install]
+WantedBy=multi-user.target

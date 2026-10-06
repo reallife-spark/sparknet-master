@@ -1,0 +1,22 @@
+schema: sparknet-note/1
+schema_version: 1
+description: "Local note conventions for this vault: the two frontmatter zones, the commands that sign and verify, and where the normative definitions live. An index, not a copy."
+source:
+  tracking: contracts/tracking-schema.json
+  protocol: contracts/provenance-protocol.md
+  implementation: shared/sparknet-provenance.py
+zones:
+  meta: "every frontmatter key except `tracking` — the compiler's field zone (title, tags, updated). Canonicalised as JSON when a note is signed."
+  tracking: "the provenance block: schema, owner_id, owner_node, owner_ref, validity, conversation, shares, agent, model, approvals, signature. Signed as JSON with `signature` removed."
+  body: "the bytes after the closing `---`, verbatim. Hashed as-is, so a compiler rewrite of the body is stale:content rather than a valid edit."
+commands:
+  verify: make provenance-verify
+  strict: make precommit
+  user: make user-init
+  approvals: make provenance-append
+  sign: "shared/sparknet-provenance.py sign-note <path> — no make wrapper: signing is the editor's act, in the same operation as the write"
+exit_codes:
+  ok: "0 — valid, stale:metadata or pending"
+  hard_failure: "1 — invalid"
+  resign_required: "2 — stale:content"
+note: "The signed message for a note is four ASCII lines: the domain tag, then the body hash, the meta hash and the tracking hash. Read the contract for the exact bytes; this file deliberately does not duplicate them."

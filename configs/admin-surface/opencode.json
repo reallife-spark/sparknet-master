@@ -1,0 +1,47 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "comment": "Config for the opencode terminal on the Master's admin surface. The terminal is the operator-facing half of the page Open WebUI serves at 10.100.0.1:8080; it has no listener of its own. The permission block below is the load-bearing part of Step 18: the surface may read and write the vault, and it may not reach a key. That is a structural claim, so it is worth encoding in the config a real session actually loads rather than only in the manifest a test reads.",
+  "permission": {
+    "edit": {
+      "*": "allow",
+      "/boot/**": "deny",
+      "/etc/**": "deny",
+      "/proc/**": "deny",
+      "/sys/**": "deny",
+      "/dev/**": "deny",
+      "/root/**": "deny",
+      "$SPARKNET_STATE_DIR/**": "deny",
+      "$SPARKNET_STATE_DIR/keys/**": "deny"
+    },
+    "bash": {
+      "*": "allow",
+      "rm -rf /": "deny",
+      "rm -rf /*": "deny",
+      "rm -rf /boot*": "deny",
+      "rm -rf /etc*": "deny",
+      "sudo rm -rf /": "deny",
+      "sudo rm -rf /*": "deny",
+      "mkfs*": "deny",
+      "dd if=* of=/dev/*": "deny",
+      "chmod -R 777 /": "deny",
+      "cat $SPARKNET_STATE_DIR/keys/*": "deny",
+      "*$SPARKNET_STATE_DIR/keys*": "deny",
+      "*signer.sock*": "deny"
+    },
+    "external_directory": {
+      "/boot/**": "deny",
+      "/etc/**": "deny",
+      "/proc/**": "deny",
+      "/sys/**": "deny",
+      "/dev/**": "deny",
+      "/root/**": "deny",
+      "$SPARKNET_STATE_DIR/**": "deny"
+    }
+  },
+  "compaction": {
+    "auto": true,
+    "prune": false,
+    "reserved": 10000
+  }
+}

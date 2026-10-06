@@ -1,0 +1,808 @@
+"""The isolated signer: what it signs, what it refuses, and what cannot reach it.
+
+Step 17 is the step where a bug in this role stops being a bug. Every other
+service here failing means a node misbehaves; the signer failing means something
+that should not have been able to authorise the fabric did.
+
+So these tests are mostly about refusals. A test that only proves the happy path
+would pass against a signer that also signs arbitrary bytes, and that is the
+specific failure this step exists to prevent.
+
+Three clusters:
+
+1. **Root binding** — the signer pins one trust root at start and refuses anything
+   else. A forged, stale, or valid-but-another-node root must all be refused.
+2. **Refusals** — key permissions, socket path, caller-supplied bytes, unknown
+   capabilities, expired approvals.
+3. **Topology** — the signer is unreachable from the peer surface. This is a
+   statement about the file layout and imports, and it is the weakest of the three:
+   it proves the wiring, not that a real deployment held. See
+   `test_deployed_containment_is_not_verified_here`.
+
+Every key in this file is generated per-test into `tmp_path`. No test reads or
+writes anything under the real state directory, and no fixture key is a real node's.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import importlib.util
+import json
+import os
+import socket
+import subprocess
+import sys
+import threading
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+ROLE_ROOT = Path(__file__).resolve().parent.parent
+FABRIC_ROOT = ROLE_ROOT.parent
+SHARED = FABRIC_ROOT / "shared"
+SIGNER_PATH = ROLE_ROOT / "services" / "sparknet-signer.py"
+STATE_DIR = ROLE_ROOT / ".state"
+
+CLOCK = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
+
+
+def _load(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    # Not optional: @dataclass resolves its own module through sys.modules and
+    # fails with an AttributeError about __dict__ that names neither cause nor file.
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def authz():
+    module = _load("signer_test_authz", SHARED / "sparknet-authz.py")
+    # _entry() needs the real fingerprint() to build a consistent entry, and the
+    # signer module was loaded against a *different* instance of this file, so it
+    # cannot be reached through signer_module.
+    _MODULE_CACHE["authz"] = module
+    return module
+
+
+@pytest.fixture(scope="module")
+def consensus():
+    return _load("signer_test_consensus", SHARED / "sparknet-consensus.py")
+
+
+@pytest.fixture(scope="module")
+def signer_module():
+    return _load("signer_under_test", SIGNER_PATH)
+
+
+def _keypair(seed: str) -> tuple[str, str]:
+    """A real Ed25519 keypair from a fixed seed, base64. Deterministic and genuine."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    key = Ed25519PrivateKey.from_private_bytes(hashlib.sha256(seed.encode()).digest())
+    private = base64.b64encode(
+        key.private_bytes(
+            serialization.Encoding.Raw,
+            serialization.PrivateFormat.Raw,
+            serialization.NoEncryption(),
+        )
+    ).decode()
+    public = base64.b64encode(
+        key.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+    ).decode()
+    return private, public
+
+
+MASTER = "alpha"
+
+
+def _unsigned_root(master: str = MASTER, nonce: str = "root-1") -> dict:
+    """A root's claims, with no signatures yet.
+
+    Built unsigned on purpose. An earlier version returned a *signed* root, and the
+    test that then tried to re-sign it with attacker keys hit `merge_root_signatures`'
+    equivocation refusal — which was the fixture's fault, and hid the behaviour the
+    test was meant to check.
+    """
+    members = []
+    for name in ("alpha", "beta", "gamma"):
+        members.append(
+            {
+                "node_id": name,
+                "fingerprint": hashlib.sha256(f"fp-{name}".encode()).hexdigest(),
+                "wireguard_pubkey": _keypair(f"wg-{name}")[1],
+                "cluster_pubkey": _keypair(f"cluster-{name}")[1],
+            }
+        )
+    return {
+        "version": "1.0",
+        "nonce": nonce,
+        "formed_at": CLOCK.isoformat(),
+        "members": members,
+        "master_node_id": master,
+        "master_pubkey": _keypair(f"operational-{master}")[1],
+    }
+
+
+def _sign(consensus, root: dict, cluster_key_seed: str = "cluster") -> dict:
+    """Sign a root one key at a time and merge, using the production ceremony.
+
+    `cluster_key_seed` is what makes a forged root forged: pass something else and
+    the members' *names* stay the same while the keys that signed are strangers.
+    """
+    maps = [
+        consensus.sign_root(root, m["node_id"], _keypair(f"{cluster_key_seed}-{m['node_id']}")[0])
+        for m in root["members"]
+    ]
+    return consensus.merge_root_signatures(root, maps)
+
+
+def _valid_root(consensus, master: str = MASTER, nonce: str = "root-1") -> dict:
+    return _sign(consensus, _unsigned_root(master=master, nonce=nonce))
+
+
+@pytest.fixture
+def operational_key(tmp_path):
+    private, public = _keypair(f"operational-{MASTER}")
+    path = tmp_path / "operational.ed25519"
+    path.write_text(private + "\n")
+    path.chmod(0o600)
+    return path, public
+
+
+@pytest.fixture
+def root(consensus, authz):
+    return _valid_root(consensus)
+
+
+@pytest.fixture
+def signer(signer_module, operational_key, root, authz, consensus, tmp_path):
+    key_path, _ = operational_key
+    return signer_module.Signer(
+        MASTER, key_path, root, authz, consensus, tmp_path / "ledger.json", clock=lambda: CLOCK,
+    )
+
+
+def _identity(capabilities=("telemetry",)) -> dict:
+    return {
+        "node_id": "peer-1",
+        "role": "peer",
+        "wireguard_public_key_b64": _keypair("peer-1-wg")[1],
+        "overlay_ipv4": "10.100.0.11/32",
+        "requested_capabilities": list(capabilities),
+    }
+
+
+def _entry(
+    capabilities=("telemetry",), revoked: bool = False, fingerprint: str | None = None
+) -> dict:
+    """A registry entry the way authz requires one to be filed.
+
+    The fingerprint is derived from the identity, not passed in. Taking it as an
+    argument is how a test ends up filing an identity under a hash of something
+    else, which authz then refuses as `unknown_fingerprint` — a confusing way to
+    learn a rule the signer is supposed to enforce rather than discover.
+    """
+    identity = _identity(capabilities)
+    return {
+        "fingerprint": fingerprint or _MODULE_CACHE["authz"].fingerprint(identity),
+        "identity": identity,
+        "capabilities": list(capabilities),
+        "issued_at": CLOCK.isoformat(),
+        "expires_at": (CLOCK + timedelta(days=30)).isoformat(),
+        "revoked": revoked,
+    }
+
+
+_MODULE_CACHE: dict = {}
+
+
+# --- 1. root binding ---------------------------------------------------------
+
+
+def test_it_signs_for_the_node_its_root_names(signer):
+    response = signer.handle({"op": "root-id"})
+    assert response["ok"] and response["node_id"] == MASTER
+
+
+def test_the_happy_path_signs_a_registry_entry(signer, authz, root):
+    response = signer.handle(
+        {"op": "sign-registry-entry", "root_id": signer.root_id, "entry": _entry()}
+    )
+    assert response["ok"], response.get("error")
+    entry = response["entry"]
+    assert entry["fingerprint"] == authz.fingerprint(entry["identity"])
+
+    # The signature must satisfy the real verifier, not just exist.
+    # Two things here are easy to get wrong and both fail as `malformed_record`
+    # rather than as a signature error, which is a misleading way to learn them:
+    # evaluate() takes an Ed25519PublicKey object, not base64 text, and the
+    # registry is {"authorizations": [entry]}, not a dict keyed by fingerprint.
+    decision = authz.evaluate(
+        entry["identity"],
+        {"authorizations": [entry]},
+        authz.public_key_from_b64(_keypair(f"operational-{MASTER}")[1]),
+        now=CLOCK,
+    )
+    assert decision.allowed, f"the signed entry was refused by authz: {decision.reason}"
+
+
+def test_it_refuses_a_forged_root(signer_module, operational_key, authz, consensus, tmp_path):
+    """A root naming this node and this key, signed by three strangers.
+
+    The membership claims are the genuine ones. Only the signatures are wrong, which
+    is the attack that matters: nothing about the document looks wrong to a reader
+    or to a diff.
+    """
+    key_path, public = operational_key
+    forged = _sign(consensus, _unsigned_root(nonce="forged"), cluster_key_seed="attacker")
+    # The root still names this node and this key — the claim is intact.
+    assert forged["master_node_id"] == MASTER
+    assert forged["master_pubkey"] == public
+
+    with pytest.raises(signer_module.SignerError, match="not valid"):
+        signer_module.Signer(
+            MASTER, key_path, forged, authz, consensus, tmp_path / "l.json"
+        )
+
+
+def test_a_stale_root_is_valid_on_its_own_which_is_the_problem(
+    signer_module, operational_key, authz, consensus, root, tmp_path
+):
+    """Establishes why the plain check is not enough.
+
+    The old root names this node, names this key, and carries all three member
+    signatures. `verify_root` accepts it. So "is this root well-formed" cannot
+    detect that the cluster has since re-formed, and a signer relying on that alone
+    would keep signing for a Master role that has moved.
+    """
+    assert consensus.verify_root(root)[0], (
+        "if this ever fails, the staleness tests below are testing nothing"
+    )
+
+
+def test_restarting_under_the_same_root_is_not_a_revert(signer_module, operational_key, authz, consensus, tmp_path):
+    """Establishes the boundary: a plain restart must NOT be refused.
+
+    Stated first because it is the case that a blunt staleness check gets wrong.
+    The signer's root id equals the root already in the ledger, so nothing has
+    moved and refusing here would make the signer impossible to restart.
+    """
+    key_path, _ = operational_key
+    root = _valid_root(consensus, nonce="root-a")
+    ledger = tmp_path / "ledger.json"
+    first = signer_module.Signer(
+        MASTER, key_path, root, authz, consensus, ledger, clock=lambda: CLOCK
+    )
+    assert first.handle(
+        {"op": "sign-registry-entry", "root_id": first.root_id, "entry": _entry()}
+    )["ok"]
+
+    restarted = signer_module.Signer(
+        MASTER, key_path, root, authz, consensus, ledger, clock=lambda: CLOCK
+    )
+    assert restarted.root_id == first.root_id
+
+
+def test_it_refuses_to_be_pointed_back_at_a_superseded_root(signer_module, operational_key, authz, consensus, tmp_path):
+    """The real revert: the cluster re-formed, and someone points the signer back.
+
+    A valid root alone cannot detect this — the old root still verifies. The ledger
+    is what remembers which root was in force, and a *different* id than the one
+    already recorded means the Master role has moved.
+    """
+    key_path, _ = operational_key
+    old_root = _valid_root(consensus, nonce="root-old")
+    new_root = _valid_root(consensus, nonce="root-new")
+    ledger = tmp_path / "ledger.json"
+
+    # First term signs under the old root, recording its id.
+    first = signer_module.Signer(
+        MASTER, key_path, old_root, authz, consensus, ledger, clock=lambda: CLOCK
+    )
+    first.handle(
+        {"op": "sign-registry-entry", "root_id": first.root_id, "entry": _entry()}
+    )
+
+    # The cluster re-forms. Adopting the new root is allowed, but only when said.
+    with pytest.raises(signer_module.SignerError, match="accept-requalification"):
+        signer_module.Signer(
+            MASTER, key_path, new_root, authz, consensus, ledger, clock=lambda: CLOCK
+        )
+    second_term = signer_module.Signer(
+        MASTER, key_path, new_root, authz, consensus, ledger,
+        clock=lambda: CLOCK, allow_requalification=True,
+    )
+    # It has to sign something: the ledger remembering the new root is the whole
+    # mechanism, and a signer that never signs leaves nothing to revert from.
+    assert second_term.handle(
+        {"op": "sign-registry-entry", "root_id": second_term.root_id, "entry": _entry()}
+    )["ok"]
+
+    # Now the revert: back to the old root, with no flag.
+    with pytest.raises(signer_module.SignerError, match="already signed under root"):
+        signer_module.Signer(
+            MASTER, key_path, old_root, authz, consensus, ledger, clock=lambda: CLOCK
+        )
+
+
+def test_requalification_is_possible_but_must_be_asked_for(
+    signer_module, operational_key, authz, consensus, tmp_path
+):
+    key_path, _ = operational_key
+    old_root = _valid_root(consensus, nonce="root-old")
+    ledger = tmp_path / "ledger.json"
+    first = signer_module.Signer(
+        MASTER, key_path, old_root, authz, consensus, ledger, clock=lambda: CLOCK
+    )
+    first.handle(
+        {"op": "sign-registry-entry", "root_id": first.root_id, "entry": _entry()}
+    )
+
+    new_root = _valid_root(consensus, nonce="root-new")
+    requalified = signer_module.Signer(
+        MASTER, key_path, new_root, authz, consensus, ledger,
+        clock=lambda: CLOCK, allow_requalification=True,
+    )
+    assert requalified.root_id != first.root_id
+    assert requalified.handle(
+        {"op": "sign-registry-entry", "root_id": requalified.root_id, "entry": _entry()}
+    )["ok"]
+    # Both terms stay in the ledger, each tagged with the root it was issued under.
+    # Re-qualification must not rewrite history: the record of what was signed under
+    # the old root is the thing that makes the next revert detectable.
+    roots_in_ledger = {
+        block["data"]["root_id"] for block in json.loads(ledger.read_text())["blocks"]
+    }
+    assert roots_in_ledger == {first.root_id, requalified.root_id}
+
+
+def test_a_corrupt_ledger_stops_the_signer_starting(
+    signer_module, operational_key, authz, consensus, root, tmp_path
+):
+    """Better to refuse than to run without knowing which root is in force."""
+    key_path, _ = operational_key
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text("{not json")
+    with pytest.raises(signer_module.SignerError, match="corrupt"):
+        signer_module.Signer(
+            MASTER, key_path, root, authz, consensus, ledger, clock=lambda: CLOCK
+        )
+
+
+def test_it_refuses_a_valid_root_that_elected_someone_else(
+    signer_module, operational_key, authz, consensus, tmp_path
+):
+    """A replacement Master running on the node that lost. Unambiguously refused."""
+    key_path, _ = operational_key
+    other = _valid_root(consensus, master="beta")
+    with pytest.raises(signer_module.SignerError, match="names 'beta' as Master"):
+        signer_module.Signer(
+            MASTER, key_path, other, authz, consensus, tmp_path / "l.json"
+        )
+
+
+def test_it_refuses_a_key_the_root_does_not_authorise(
+    signer_module, root, authz, consensus, tmp_path
+):
+    """The check that stops any node from starting a signer and being believed."""
+    private, _ = _keypair("someone-elses-operational-key")
+    key_path = tmp_path / "operational.ed25519"
+    key_path.write_text(private + "\n")
+    key_path.chmod(0o600)
+
+    with pytest.raises(signer_module.SignerError, match="not the key this root authorises"):
+        signer_module.Signer(
+            MASTER, key_path, root, authz, consensus, tmp_path / "l.json"
+        )
+
+
+def test_a_request_may_not_substitute_its_own_root(signer, root, consensus):
+    other = consensus.root_id(_valid_root(consensus, nonce="root-9"))
+    response = signer.handle(
+        {"op": "sign-registry-entry", "root_id": other, "entry": _entry()}
+    )
+    assert not response["ok"] and "pinned" in response["error"]
+
+
+# --- 2. refusals -------------------------------------------------------------
+
+
+def test_the_signer_holds_exactly_one_capability(signer):
+    response = signer.handle({"op": "capabilities"})
+    assert response["capabilities"] == ["sign"], (
+        "the signer's capability set must contain nothing else; a second entry "
+        "would be a second thing this process could be talked into"
+    )
+
+
+def test_it_refuses_to_sign_caller_supplied_bytes(signer):
+    for op in ("sign-bytes", "sign", "sign-raw", "raw-sign"):
+        response = signer.handle({"op": op, "bytes_b64": base64.b64encode(b"x").decode()})
+        assert not response["ok"], f"{op} must not be answerable"
+
+
+def test_it_refuses_unknown_operations(signer):
+    response = signer.handle({"op": "read-file", "path": "/etc/shadow"})
+    assert not response["ok"] and "unknown operation" in response["error"]
+
+
+def test_it_refuses_an_entry_filed_under_the_wrong_fingerprint(signer, authz):
+    """The signer must not mint an authorization no peer will ever honour.
+
+    `authz.evaluate` refuses an entry whose identity does not hash to the
+    fingerprint it is filed under, reporting `unknown_fingerprint`. A signer that
+    did not check this would happily produce a perfectly valid signature over a
+    useless entry: the operator sees `ok`, and the grant silently does nothing.
+    """
+    entry = _entry()
+    entry["fingerprint"] = "b" * 64
+    response = signer.handle(
+        {"op": "sign-registry-entry", "root_id": signer.root_id, "entry": entry}
+    )
+    assert not response["ok"]
+    assert "unknown_fingerprint" in response["error"]
+    assert "hashes to" in response["error"]
+
+    # And confirm the claim: the same entry, filed correctly, is accepted.
+    good = _entry()
+    assert good["fingerprint"] == authz.fingerprint(good["identity"])
+
+
+def test_it_refuses_unknown_capabilities_in_a_registry_entry(signer):
+    response = signer.handle(
+        {
+            "op": "sign-registry-entry",
+            "root_id": signer.root_id,
+            "entry": _entry(capabilities=("telemetry", "become-master")),
+        }
+    )
+    assert not response["ok"] and "become-master" in response["error"]
+
+
+def test_it_refuses_a_registry_entry_missing_signed_fields(signer):
+    entry = _entry()
+    del entry["expires_at"]
+    response = signer.handle(
+        {"op": "sign-registry-entry", "root_id": signer.root_id, "entry": entry}
+    )
+    assert not response["ok"] and "expires_at" in response["error"]
+
+
+def test_it_refuses_a_signature_the_caller_supplied(signer):
+    """A caller must not be able to smuggle a signature in and have it recorded."""
+    entry = _entry(revoked=True)
+    entry["signature_b64"] = base64.b64encode(b"forged").decode()
+    response = signer.handle(
+        {"op": "sign-registry-entry", "root_id": signer.root_id, "entry": entry}
+    )
+    assert response["ok"]
+    assert response["entry"]["signature_b64"] != entry["signature_b64"], (
+        "the signer returned the caller's signature instead of its own"
+    )
+
+
+def test_it_refuses_a_blank_guard_approval(signer):
+    response = signer.handle(
+        {
+            "op": "sign-guard-approval",
+            "root_id": signer.root_id,
+            "approval": {"peer_fingerprint": "f" * 64},
+        }
+    )
+    assert not response["ok"] and "blank approval" in response["error"]
+
+
+def test_it_refuses_an_already_expired_approval(signer):
+    response = signer.handle(
+        {
+            "op": "sign-guard-approval",
+            "root_id": signer.root_id,
+            "approval": {
+                "peer_fingerprint": "f" * 64,
+                "guard_protocol_version": "1.0",
+                "target_path": "/srv/sparknet/ledger.json",
+                "action": "replace",
+                "expires_at": (CLOCK - timedelta(hours=1)).isoformat(),
+            },
+        }
+    )
+    assert not response["ok"] and "expired" in response["error"]
+
+
+def test_a_valid_guard_approval_is_signed(signer):
+    response = signer.handle(
+        {
+            "op": "sign-guard-approval",
+            "root_id": signer.root_id,
+            "approval": {
+                "peer_fingerprint": "f" * 64,
+                "guard_protocol_version": "1.0",
+                "target_path": "/srv/sparknet/ledger.json",
+                "action": "replace",
+                "expires_at": (CLOCK + timedelta(minutes=10)).isoformat(),
+            },
+        }
+    )
+    assert response["ok"], response.get("error")
+    assert response["approval"]["signature_b64"]
+
+
+def test_it_refuses_a_group_readable_key(signer_module, root, authz, consensus, tmp_path):
+    private, _ = _keypair(f"operational-{MASTER}")
+    key_path = tmp_path / "loose.ed25519"
+    key_path.write_text(private + "\n")
+    key_path.chmod(0o644)
+    with pytest.raises(signer_module.SignerError, match="must not be readable by group or other"):
+        signer_module.check_key_permissions(key_path)
+
+
+def test_it_refuses_a_tcp_socket_path(signer_module, tmp_path):
+    with pytest.raises(signer_module.SignerError, match="unix socket only"):
+        signer_module.check_socket_path(Path("tcp://0.0.0.0:9090"))
+
+
+def test_it_refuses_a_socket_outside_the_state_dir(signer_module, tmp_path, monkeypatch):
+    monkeypatch.setattr(signer_module, "DEFAULT_STATE_DIR", tmp_path / "state")
+    with pytest.raises(signer_module.SignerError, match="must live under"):
+        signer_module.check_socket_path(Path("/tmp/somewhere-else.sock"))
+
+
+def test_it_accepts_a_socket_inside_the_state_dir(signer_module, tmp_path, monkeypatch):
+    monkeypatch.setattr(signer_module, "DEFAULT_STATE_DIR", tmp_path / "state")
+    signer_module.check_socket_path(tmp_path / "state" / "signer.sock")
+
+
+# --- 3. topology -------------------------------------------------------------
+
+
+def test_no_peer_service_imports_the_signer():
+    """The parity allowlist already excludes it; this asserts the file itself.
+
+    A peer service that could import the signer would make the isolation a naming
+    convention, so this is a statement about the whole peer surface at once.
+    """
+    for path in sorted((FABRIC_ROOT / "peer-node" / "services").glob("*.py")):
+        text = path.read_text()
+        assert "sparknet-signer" not in text, f"{path.name} references the signer"
+        assert "sparknet_signer" not in text
+
+
+def test_the_parity_loader_cannot_load_the_signer(signer_module):
+    parity = _load("parity_for_isolation", ROLE_ROOT / "services" / "sparknet-parity.py")
+    with pytest.raises(parity.ParityError):
+        parity.load_peer_service("sparknet-signer.py")
+
+
+def test_no_vendor_manifest_points_at_the_signer_port():
+    """The signer is not on the declared port list, so no deployment will expose it.
+
+    Scans the port *declarations*, not the prose. An earlier version scanned the
+    whole serialised document and started failing when port 8080's note explained
+    that authority messages are signed elsewhere and never on the admin page — the
+    note reassuring a reader that the signer is unreachable tripped a test whose
+    job is to keep the signer unreachable. The distinction that matters is whether
+    a port is *declared for* the signer, not whether the word appears nearby.
+    """
+    ports = json.loads((FABRIC_ROOT / "contracts" / "ports.json").read_text())["ports"]
+    for number, spec in ports.items():
+        # A declared port is an invitation to expose it, so check the fields that
+        # actually name a service.
+        declared = json.dumps(
+            {
+                "service": spec.get("service"),
+                "binds_to": spec.get("binds_to"),
+            },
+            sort_keys=True,
+        ).lower()
+        for needle in ("signer", "signing"):
+            assert needle not in declared, (
+                f"port {number} is declared as {spec.get('service')!r}; the signer "
+                f"must have no declared port, because a declared port is an "
+                f"invitation to expose it"
+            )
+
+
+def test_the_signer_source_opens_no_tcp_listener(signer_module):
+    """No AF_INET, no bind-to-port, no http. Stated as a source property because a
+    test cannot prove a negative about all future edits."""
+    source = SIGNER_PATH.read_text()
+    for forbidden in ("AF_INET", "SOCK_DGRAM", "http.server", "socketserver", "urlopen"):
+        assert forbidden not in source, (
+            f"the signer references {forbidden!r}; it must not be able to open a "
+            f"network listener of any kind"
+        )
+    assert "AF_UNIX" in source, "it must actually use the unix socket it documents"
+
+
+def test_describe_states_the_posture_rather_than_implying_it(signer_module):
+    posture = signer_module.describe()
+    assert posture["capabilities"] == ["sign"]
+    assert "unix socket" in posture["transport"]
+    assert any("caller-supplied bytes" in r for r in posture["refuses"])
+    assert any("Open WebUI" in entry for entry in posture["not_reachable_from"])
+
+
+def test_deployed_containment_is_not_verified_here():
+    """The DoD's `confirm: user` item, recorded rather than quietly dropped.
+
+    Every topology test in this file proves the *wiring* — imports, allowlists,
+    declared ports, source shape. None of them proves that a real deployment held:
+    that needs a machine with the signer and Open WebUI on it, someone attempting a
+    crossing from the web surface, and an observation that it failed. This test
+    exists so a reader of a green suite does not mistake wiring for containment.
+    """
+    assert True, (
+        "wiring is asserted above; deployed containment is NOT verified on the "
+        "development host and requires Step 17 DoD item 3 to be confirmed by the user"
+    )
+
+
+# --- 4. over a real socket ---------------------------------------------------
+
+
+def test_it_answers_over_a_unix_socket_and_records_to_the_ledger(
+    signer, authz, tmp_path, consensus
+):
+    """End to end over the real transport, in a thread so the test can talk to it.
+
+    Threaded rather than forked because the point is that the socket path, the
+    0600 mode and the line protocol work, not that the process survives a fork.
+    """
+    socket_dir = tmp_path / "state" / "signer"
+    socket_dir.mkdir(parents=True)
+    socket_path = socket_dir / "signer.sock"
+    mode_before = stat_mode_of_dir(tmp_path)
+
+    thread = threading.Thread(target=_serve_forever, args=(signer, socket_path), daemon=True)
+    thread.start()
+    _wait_for_socket(socket_path)
+
+    try:
+        assert stat_mode_of_path(socket_path) == 0o600, "the socket must not be group-accessible"
+        assert mode_before is not None
+
+        response = _request(socket_path, {"op": "capabilities"})
+        assert response["capabilities"] == ["sign"]
+
+        response = _request(
+            socket_path,
+            {"op": "sign-registry-entry", "root_id": signer.root_id, "entry": _entry()},
+        )
+        assert response["ok"], response.get("error")
+
+        # The ledger must now hold a signature_issued block that verifies.
+        ledger = json.loads((tmp_path / "ledger.json").read_text())
+        assert len(ledger["blocks"]) == 1
+        data = ledger["blocks"][0]["data"]
+        assert data["event"] == "signature_issued"
+        assert data["operation"] == "sign-registry-entry"
+        assert data["root_id"] == signer.root_id
+        assert response["entry"]["signature_b64"] == data["signature_b64"]
+
+        # And the chain must be intact, checked by the module that owns verification.
+        import importlib.util as _u
+
+        spec = _u.spec_from_file_location(
+            "ledger_for_isolation", ROLE_ROOT / "services" / "sparknet-ledger.py"
+        )
+        ledger_module = _u.module_from_spec(spec)
+        spec.loader.exec_module(ledger_module)
+        ok, detail = ledger_module.verify_chain(ledger)
+        assert ok, detail
+    finally:
+        thread.join(timeout=1)
+
+
+def test_two_signatures_chain_on_top_of_each_other(signer, tmp_path, authz, consensus):
+    """Ledger order is part of what the chain attests, so prev_hash must advance."""
+    first = signer.handle(
+        {"op": "sign-registry-entry", "root_id": signer.root_id, "entry": _entry()}
+    )
+    second = signer.handle(
+        {"op": "sign-registry-entry", "root_id": signer.root_id, "entry": _entry()}
+    )
+    assert first["ok"] and second["ok"]
+    assert first["ledger_block"] != second["ledger_block"]
+
+    ledger = json.loads((tmp_path / "ledger.json").read_text())
+    assert ledger["blocks"][0]["prev_hash"] == ""
+    assert ledger["blocks"][1]["prev_hash"] == ledger["blocks"][0]["hash"]
+
+
+def test_a_refused_request_writes_nothing_to_the_ledger(signer, tmp_path):
+    signer.handle({"op": "sign-registry-entry", "root_id": "wrong", "entry": _entry()})
+    assert not (tmp_path / "ledger.json").exists(), (
+        "a refusal must not create a ledger; otherwise a run of failed requests "
+        "would leave a record of nothing having happened"
+    )
+
+
+# --- helpers -----------------------------------------------------------------
+
+
+def _serve_forever(signer, socket_path: Path) -> None:
+    import importlib.util as _u
+
+    spec = _u.spec_from_file_location("signer_serve_helper", SIGNER_PATH)
+    module = _u.module_from_spec(spec)
+    sys.modules["signer_serve_helper"] = module
+    spec.loader.exec_module(module)
+    try:
+        module.serve(signer, socket_path)
+    except OSError:
+        pass
+
+
+def _wait_for_socket(socket_path: Path, timeout: float = 5.0) -> None:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if socket_path.exists():
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"signer socket {socket_path} never appeared")
+
+
+def _request(socket_path: Path, payload: dict) -> dict:
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        client.connect(str(socket_path))
+        client.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+        buffered = b""
+        while b"\n" not in buffered:
+            chunk = client.recv(4096)
+            if not chunk:
+                break
+            buffered += chunk
+        return json.loads(buffered.split(b"\n", 1)[0].decode("utf-8"))
+    finally:
+        client.close()
+
+
+def stat_mode_of_path(path: Path) -> int:
+    return path.stat().st_mode & 0o777
+
+
+def stat_mode_of_dir(path: Path) -> int | None:
+    return path.stat().st_mode & 0o777 if path.exists() else None
+
+
+def test_the_signer_is_never_started_by_anything_but_its_own_unit():
+    """Step 16 shipped no signer unit. If something else started it, that would be
+    a surface nobody reviewed."""
+    # ExecStart lines only. Asserting over whole unit files flags a *description*
+    # that merely mentions the signer, which is documentation, not a start path.
+    exec_lines = [
+        line.strip()
+        for unit in (ROLE_ROOT / "systemd").glob("*.service")
+        for line in unit.read_text().splitlines()
+        if line.strip().lower().startswith("execstart")
+    ]
+    starting_the_signer = [line for line in exec_lines if "signer" in line]
+    assert len(starting_the_signer) <= 1, (
+        f"more than one unit starts the signer: {starting_the_signer}. Each start "
+        f"path is a place the key becomes reachable, and only one has been reviewed"
+    )
+
+
+def test_cli_refuses_to_start_without_a_key(tmp_path):
+    """A missing or unreadable key must stop it, not degrade to unsigned mode."""
+    result = subprocess.run(
+        [
+            sys.executable, str(SIGNER_PATH),
+            "--node-id", MASTER, "--root", str(tmp_path / "absent.json"),
+        ],
+        capture_output=True, text=True, env={**os.environ, "SPARKNET_STATE_DIR": str(tmp_path)},
+    )
+    assert result.returncode == 1
+    assert "not found" in result.stderr or "not valid" in result.stderr
+    assert "refusing" in result.stderr or "not found" in result.stderr

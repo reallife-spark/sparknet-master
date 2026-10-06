@@ -1,33 +1,48 @@
-"""The Master role is specified, not built — keep that claim true.
+"""The Master role is built, and its pages must keep describing it accurately.
 
-This role has no `scripts/`, `services/` or `systemd/` directory, on purpose.
-That is a *decision*, and a decision that decays silently: the first service to
-land makes the charter's "nothing here runs yet" false, while the charter, the
-mission page and the build plan keep asserting it. A reader then trusts a
-description of something that does not exist.
+This file used to assert the *opposite*: that `scripts/`, `services/` and
+`systemd/` did not exist, so the role could not drift into running code while the
+charter still claimed it did not. That discipline was real, and it was retired the
+moment the first executable surface landed — the module docstring predicted this
+migration and named the discipline, and Step 15 of the build plan is where it
+happens.
 
-So the boundary is asserted, not just documented. The moment Step 3 of the
-build plan lands, these tests fail and the prose gets updated on purpose — in
-the same commit that adds the code.
+The replacement is not "stop asserting anything". It is the same instinct pointed
+the other way: a role with code must be *wired*, and its pages must not describe
+code that does not exist. So this file now asserts that each executable directory
+is reachable from a unit or a make target, and that the claiming pages describe
+what works.
+
+Two assertions are carried over untouched, because they were never about whether
+the role is built:
+
+- `test_private_key_is_never_in_the_vault` — the operational key must never enter
+  this vault, and building the role made that *more* important, not less.
+- `test_master_template_is_documentation_only` — a rendered `wg0.conf` is machine
+  state and does not belong here.
 """
 
 from __future__ import annotations
 
 import re
+import stat
 from pathlib import Path
 
 import pytest
 
 VAULT_ROOT = Path(__file__).resolve().parent.parent
+FABRIC_ROOT = VAULT_ROOT.parent
+
+
 PLAN = VAULT_ROOT / "plans" / "MASTER_BUILD_PLAN.md"
 AGENTS = VAULT_ROOT / "AGENTS.md"
 MISSION = VAULT_ROOT / "MISSION.md"
 
-# Directories that would mean this role has an executable surface.
-FORBIDDEN_DIRS = ("scripts", "services", "systemd")
+# Directories that make up this role's executable surface.
+EXECUTABLE_DIRS = ("scripts", "services", "systemd")
 
-# Pages that describe the role and therefore must keep saying it is unbuilt.
-UNBUILT_CLAIMING_PAGES = (AGENTS, MISSION, VAULT_ROOT / "docs" / "master-control-plane.md")
+#: Pages that describe the role and therefore must not describe code that is absent.
+CLAIMING_PAGES = (AGENTS, MISSION, VAULT_ROOT / "docs" / "master-control-plane.md")
 
 
 def test_plan_cursor_exists_and_points_at_a_real_step() -> None:
@@ -50,31 +65,75 @@ def test_every_step_has_a_verifiable_dod() -> None:
     for step in steps:
         section = text.split(f"**Step {step}**", 1)[1].split("**Step ", 1)[0]
         assert "**DoD**" in section, f"Step {step} has no DoD"
-        # An unverifiable DoD must be flagged rather than quietly accepted.
         assert re.search(r"\(\d\)|DoD: confirm: user|DoD", section), (
             f"Step {step} DoD is not checkable"
         )
 
 
-def test_role_has_no_executable_surface() -> None:
-    """Step 3 is where that stops being true."""
-    present = [d for d in FORBIDDEN_DIRS if (VAULT_ROOT / d).is_dir()]
-    assert not present, (
-        f"{present} exist in master-node/. This role is documented as unbuilt. "
-        f"If build plan Step 3 has landed, update AGENTS.md, MISSION.md, "
-        f"docs/master-control-plane.md and this test in the same commit."
+def test_the_role_has_an_executable_surface() -> None:
+    """A Master is a peer that won an election, so this role runs code.
+
+    The assertion is now that the surface exists *and* is deliberate. A directory
+    that appears with nothing wired to it is how a role accumulates code nobody
+    starts, which is the same decay the old assertion was watching for.
+    """
+    for name in EXECUTABLE_DIRS:
+        assert (VAULT_ROOT / name).is_dir(), (
+            f"{name}/ is missing from master-node/. This role runs the peer's "
+            f"services by path plus its own signer and scripts."
+        )
+
+
+def test_every_executable_directory_is_wired_to_something() -> None:
+    """Nothing here may sit inert. Each surface must be reachable from a unit or
+    a make target, so an unrunnable service is a build failure rather than a
+    surprise at deploy time."""
+    makefile = (VAULT_ROOT / "Makefile").read_text()
+    units = "\n".join(
+        u.read_text() for u in (VAULT_ROOT / "systemd").glob("*.service")
     )
+    for name in EXECUTABLE_DIRS:
+        entries = sorted(
+            p.name for p in (VAULT_ROOT / name).iterdir()
+            if p.is_file() and not p.name.endswith((".md", ".pyc"))
+        )
+        assert entries, f"{name}/ is empty"
+        for entry in entries:
+            referenced = entry in units or entry in makefile
+            assert referenced, (
+                f"{name}/{entry} is not referenced by any systemd unit or Makefile "
+                f"target, so nothing would ever run it"
+            )
 
 
-@pytest.mark.parametrize("page", UNBUILT_CLAIMING_PAGES, ids=lambda p: p.name)
-def test_pages_still_declare_the_role_unbuilt(page: Path) -> None:
+@pytest.mark.parametrize("page", CLAIMING_PAGES, ids=lambda p: p.name)
+def test_pages_do_not_still_claim_the_role_is_unbuilt(page: Path) -> None:
+    """The old claim is now false, and a stale claim is worse than none.
+
+    A reader who sees "specified, not built" in a role that has a signer will
+    either distrust the code or trust the prose. Neither is useful.
+    """
     if not page.is_file():
         pytest.skip(f"{page.name} not present")
     text = page.read_text()
-    assert re.search(r"\bunbuilt\b|\bnot built\b|\bnothing here runs yet\b", text, re.I), (
-        f"{page.name} no longer says the role is unbuilt — if the code landed, "
-        f"say what works instead of leaving a stale or absent claim"
+    stale = re.search(r"nothing here runs yet|is documented as unbuilt|"
+                       r"status:\s*\**specified, not built", text, re.I)
+    assert stale is None, (
+        f"{page.name} still claims the role is unbuilt: {stale.group(0)!r}. "
+        f"Describe what works instead."
     )
+
+
+def test_claiming_pages_name_something_real() -> None:
+    """Not merely 'no longer says unbuilt' — must positively describe the surface."""
+    for page in CLAIMING_PAGES:
+        if not page.is_file():
+            continue
+        text = page.read_text()
+        assert any(
+            token in text
+            for token in ("services/", "scripts/", "systemd/", "signer")
+        ), f"{page.name} must describe the executable surface, not just deny it"
 
 
 def test_charter_does_not_hard_code_a_machine_path() -> None:
@@ -100,13 +159,106 @@ def test_master_template_is_documentation_only() -> None:
     )
 
 
-def test_private_key_is_never_in_the_vault() -> None:
-    """The single most damaging mistake available on this role."""
+def test_private_key_is_never_in_the_vault(state_dir) -> None:
+    """The single most damaging mistake available on this role.
+
+    Two claims, checked separately because one scan cannot make both.
+
+    **Nothing key-shaped is tracked.** This is the claim that cannot be repaired by
+    deleting a file, so it is asked of git rather than of the working tree: a key
+    removed from disk but still in history is exactly the disaster.
+
+    **Nothing key-shaped is in the vault proper.** The state dir is *outside* the
+    vault entirely — `state_dir` comes from the env script, so there is no
+    exclusion to carve out here. It used to be `<role>/.state`, excluded narrowly
+    by exact path; that arrangement put the signing key under the admin surface's
+    bind mount, so the exclusion was removed by moving the keys rather than by
+    widening the glob.
+    """
+    import subprocess
+
+    patterns = ("master-node/**.ed25519", "master-node/**.key",
+                "master-node/**.pem", "master-node/**privkey*")
+    tracked = subprocess.run(
+        ["git", "-C", str(FABRIC_ROOT), "ls-files", *patterns],
+        capture_output=True, text=True, check=False,
+    ).stdout.split()
+    assert not tracked, (
+        f"private key material is tracked by git: {tracked}. It is in history — "
+        f"rotate the key; removing the file changes nothing."
+    )
+
+    assert state_dir not in VAULT_ROOT.parents and state_dir != VAULT_ROOT, (
+        f"SPARKNET_STATE_DIR resolves to {state_dir}, inside the vault. The admin "
+        f"surface bind-mounts this tree read-only into an LLM container, so a key "
+        f"here is readable from it."
+    )
     suspicious = [
         p for p in VAULT_ROOT.rglob("*")
         if p.is_file()
         and p.suffix not in {".pyc"}
         and "sessions" not in p.parts
-        and re.search(r"(ed25519|master).*\.(key|pem)$|id_ed25519", p.name, re.I)
+        and not p.is_relative_to(state_dir)
+        and re.search(r"\.(ed25519|key|pem|seed)$|id_ed25519|privkey", p.name, re.I)
     ]
     assert not suspicious, f"possible Master private key in the vault: {suspicious}"
+
+
+def test_state_dir_private_keys_are_not_world_readable(state_dir) -> None:
+    """`$SPARKNET_STATE_DIR` is the one place a private key may exist, so police it.
+
+    Without this, "no key in the vault" is satisfied by moving every key into a
+    world-readable directory — which is what a careless umask on a shared machine
+    produces, and it fails without any error anyone would notice.
+    """
+    keys_dir = state_dir / "keys"
+    if not keys_dir.is_dir():
+        pytest.skip("no keys generated yet on this host (run `make keygen`)")
+
+    mode_dir = stat.S_IMODE(keys_dir.stat().st_mode)
+    assert mode_dir == 0o700, (
+        f"{keys_dir} is mode {oct(mode_dir)}; the key directory must be 0700"
+    )
+    for key in keys_dir.glob("*.ed25519"):
+        mode = stat.S_IMODE(key.stat().st_mode)
+        assert mode == 0o600, (
+            f"{key} is mode {oct(mode)}; a private half must be 0600. This is the "
+            f"one assertion standing between a keygen run and a readable key."
+        )
+
+def test_the_identity_manifest_uses_the_contract_field_names():
+    """A manifest whose field names drift from the contract hashes to nothing.
+
+    `authz.fingerprint` deliberately ignores any field outside `IDENTITY_FIELDS`, so
+    a renamed field does not raise and does not warn: the identity simply hashes
+    differently from the one the contract describes, and the node is unreachable
+    for reasons that look like a network fault. This manifest had drifted to
+    `wireguard_pubkey_b64` while the contract, the peer manifest, authz and the
+    docs all said `wireguard_public_key_b64`.
+    """
+    import importlib.util
+    import json
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    manifest = json.loads((root / "master-node/manifests/node-identity.json").read_text())
+    contract = json.loads((root / "contracts/identity-schema.json").read_text())
+
+    spec = importlib.util.spec_from_file_location(
+        "spec_authz_field_check", root / "shared/sparknet-authz.py"
+    )
+    authz = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = authz
+    spec.loader.exec_module(authz)
+
+    declared = tuple(contract["identity_fields"])
+    assert declared == authz.IDENTITY_FIELDS, (
+        "the contract and the one authz implementation disagree about which fields "
+        "an identity is made of; the implementation is what actually hashes"
+    )
+    missing = [f for f in declared if f not in manifest]
+    assert not missing, (
+        f"the master identity manifest is missing {missing}, so its fingerprint "
+        f"would be computed over a different set of fields than the contract says"
+    )

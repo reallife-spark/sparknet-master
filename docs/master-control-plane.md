@@ -31,6 +31,20 @@ things:
 4. **The cluster KillSwitch.** Fabric-wide containment, from the Master, root on
    the Master.
 
+## Responsibilities — the Master as infrastructure administrator
+
+The user has directed that the Master also **administers** the fabric's
+infrastructure: git, file sharing, NAT and the vector embeddings database.
+"Administers" is a role responsibility, not an existence claim — all four are
+`implementation_state: spec-only` in `contracts/ports.json` (`4220`–`4223`,
+`bound_by: master`, `overlay_only`, bound to `10.100.0.1`). The scoping is
+[`../plans/MASTER_ADMIN_PLAN.md`](../plans/MASTER_ADMIN_PLAN.md).
+
+Nothing on that list listens yet. A port flips to `provisioned` only with real
+scaffolding and a `runtime_why` measurement, and the four services are, like
+the signer and the admin surface, **structural non-adjacency**: an
+infrastructure service may not load, invoke or proxy to the signing key.
+
 ## Components
 
 | Component | Purpose | Build plan step |
@@ -44,6 +58,7 @@ things:
 | Instant push (`8090`) | ACL changes POSTed to peers | 7 |
 | Cluster KillSwitch | fabric-wide containment | 8 |
 | Pooling scheduler | idle detection, pooled-memory batches | 9 |
+| Git / file share / NAT / vector DB (`4220`–`4223`) | infrastructure administration | `MASTER_ADMIN_PLAN.md` (spec-only) |
 
 ## The signing path
 
@@ -117,12 +132,42 @@ What exists today:
 
 - [`../plans/MASTER_BUILD_PLAN.md`](../plans/MASTER_BUILD_PLAN.md) — the work
   order, including the registry, KillSwitch and egress steps
+- [`../plans/MASTER_ADMIN_PLAN.md`](../plans/MASTER_ADMIN_PLAN.md) — the
+  infrastructure-administrator scope (git, file share, NAT, vector DB),
+  all spec-only
 - [`../../contracts/identity-schema.json`](../../contracts/identity-schema.json) —
   canonical form and the signed envelope
 - [`../../contracts/guard-protocol.md`](../../contracts/guard-protocol.md) — the
-  approval conversation, and why the Master side of it does not exist yet
+  approval conversation, and why the Master side of it is the isolated signer
+  (Step 17) rather than another service
 - [`../../contracts/ports.json`](../../contracts/ports.json) — which role listens
-  where, and which of those listeners are still declared-but-unimplemented
+  where, and which of those listeners are still declared-but-unimplemented.
+  `implementation_state` travels with the contract; `runtime` is measured per host
+
+## What actually runs here
+
+Build plan Steps 15–16 made this role executable. `make validate` proves each
+line of it.
+
+| Path | Runs | Verified by |
+|---|---|---|
+| `services/sparknet-parity.py` | loads `peer-node/services/*` by path | `make parity`, `tests/test_master_parity.py` |
+| `services/sparknet-ledger.py` | verifies the Master's hash chain | `make ledger` |
+| `scripts/sparknet-master-env.sh` | resolves vault + peer paths | `make env-show` |
+| `scripts/sparknet-master-keygen.sh` | writes 3 Ed25519 keys to `$SPARKNET_STATE_DIR/keys`, 0600 | `make keygen`, `make keys-check` |
+| `systemd/*.service` | parity check and chain verification at boot | `make units`, `make units-check` |
+
+The parity loader is the load-bearing one. It is what makes "a Master is a peer"
+true in the code rather than only in prose, and it **fails loudly** instead of
+falling back to a private copy: a second copy of `sparknet-guard-d.py` would
+verify signatures correctly on one node and fail on the other, which is the
+worst failure shape available here.
+
+The ledger can verify but not append. Appending needs the operational key, and
+the operational key belongs to the isolated signer (Step 17) — an unsigned append
+would let anyone with write access rewrite the history a hash chain exists to
+protect, so the honest state is verify-only. Key custody is described in
+[`../security/key-management.md`](../security/key-management.md).
 
 **Not written yet**, and named here so their absence is visible rather than
 implied: `docs/registry-protocol.md`, `docs/network-posture.md`. Each is the

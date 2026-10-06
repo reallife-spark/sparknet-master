@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "role",
+    "schema_version",
+    "authorizations"
+  ],
+  "properties": {
+    "role": {
+      "type": "string",
+      "const": "registry"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "issued_at": {
+      "type": "string"
+    },
+    "issuer": {
+      "type": "string"
+    },
+    "authorizations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "fingerprint",
+          "identity",
+          "capabilities",
+          "signature"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "fingerprint": { "type": "string" },
+          "identity": { "type": "object" },
+          "capabilities": { "type": "array", "items": { "type": "string" } },
+          "signature": { "type": "string" }
+        }
+      }
+    }
+  }
+}

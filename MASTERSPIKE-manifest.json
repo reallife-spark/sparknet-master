@@ -1,0 +1,109 @@
+{
+  "schema_version": "1.0",
+  "name": "MASTERSPIKE",
+  "role": "master",
+  "description": "The elected Master's knowledge manifest, in the three-layer llm-wiki shape: raw sources, the distilled wiki, and the schema that governs both. Every layer is oriented to administration — this is the knowledge an admin surface reasons over, not a peer's working knowledge.",
+  "shape_source": ".opencode/skills/llm-wiki/SKILL.md — three-layer architecture (raw sources -> wiki -> schema)",
+  "authored": "2026-10-05",
+  "not_a_model_choice": "This manifest names layers, not a base model. Which model serves the admin surface is a separate, unmade decision, and writing one in here would imply a choice nobody has made.",
+
+  "raw": {
+    "orientation": "administration",
+    "what_belongs_here": "Everything authoritative that has not yet been distilled: cluster trust roots, signed registry entries, ledger blocks, contract revisions, unit files, the plans, and the raw session transcripts that explain why a decision was taken.",
+    "authority": "Authoritative but poor to query directly — this layer is the source code, not the running program.",
+    "authoritative": [
+      {
+        "path": "contracts/consensus-protocol.md",
+        "why": "The narrative contract for election, roots and re-formation, including the open question about losing a member."
+      },
+      {
+        "path": "contracts/identity-schema.json",
+        "why": "Defines identity_fields and cluster_trust_root once, for both roles."
+      },
+      {
+        "path": "contracts/capabilities.json",
+        "why": "The capability vocabulary, trust levels and share clocks. A grant is meaningless outside it."
+      },
+      {
+        "path": "contracts/ports.json",
+        "why": "Every port either role binds or dials, with implementation_state separated from runtime."
+      },
+      {
+        "path": "master-node/blockchain/ledger.json",
+        "why": "The hash-chained record. Proves integrity and order; does not prove truth."
+      },
+      {
+        "path": "master-node/manifests/cluster-trust-root.json",
+        "why": "The fail-closed template. As shipped it names no Master and carries no signatures."
+      },
+      {
+        "path": "master-node/manifests/admin-surface.json",
+        "why": "The declared admin topology, including the capability this surface is not allowed."
+      },
+      {
+        "path": "master-node/plans/MASTER_BUILD_PLAN.md",
+        "why": "The work order and its current cursor."
+      },
+      {
+        "path": "master-node/systemd/",
+        "why": "Three units. The signer unit is staged but never enabled by make units."
+      }
+    ],
+    "ingest_note": "Raw material is captured, never deleted from _raw/. Ingest moves and distils; it does not discard the only copy."
+  },
+
+  "wiki": {
+    "orientation": "administration",
+    "vault_path_source": "master-node/.env (VAULT_PATH) — never hard-coded in a page",
+    "what_belongs_here": "Distilled, cross-referenced knowledge an admin can answer from without re-deriving it: how authority works, what each key signs, what a re-formation costs, what the ledger does and does not prove, what the boundaries are and why.",
+    "categories": ["concepts", "entities", "skills", "references", "synthesis", "journal"],
+    "core_pages": [
+      {
+        "concept": "concepts/key-separation.md",
+        "answers": "Why three Ed25519 keys, and which one signs what."
+      },
+      {
+        "concept": "concepts/authority-from-a-signed-root.md",
+        "answers": "Why a deployment directory confers nothing and a node is a peer until elected."
+      },
+      {
+        "concept": "concepts/structural-key-isolation.md",
+        "answers": "Why the signer is a separate process and not a permission rule."
+      },
+      {
+        "concept": "concepts/ledger-integrity-vs-truth.md",
+        "answers": "What a hash chain proves, and the thing it does not."
+      },
+      {
+        "concept": "concepts/optimistic-share-ratification.md",
+        "answers": "Why absence of a Master ratification is not evidence of absence."
+      },
+      {
+        "entity": "entities/the-admin-surface.md",
+        "answers": "What the admin surface may reach, and the one capability it may not."
+      },
+      {
+        "synthesis": "synthesis/three-node-cluster-limits.md",
+        "answers": "What follows from unanimity at n=3, drawn across the protocol, the signer and the recovery story."
+      }
+    ],
+    "provenance": "Every page carries a provenance state. A claim with no source is marked a guess, and a guess is allowed to be wrong in public — an unsourced assertion is not.",
+    "query_before_crawl": "An admin surface that re-derives what the wiki already answers will drift from it, and drift in a knowledge base is invisible until it is expensive."
+  },
+
+  "schema": {
+    "orientation": "administration",
+    "what_belongs_here": "The rules that govern how the other two layers are maintained: what an admin claim must cite, how a verdict is worded, which states a page may claim, and what must never be written down.",
+    "governs": ["raw", "wiki"],
+    "rules": {
+      "three_states_only": "A component is specified, implemented-and-tested, or deployed. No fourth state, and no blending — 'basically working' is how a signer that has never signed anything ends up described as live.",
+      "cite_or_mark": "Every factual claim carries a path or a ledger block. Without one it is labelled a guess.",
+      "no_secrets": "Keys are referenced by path only, never by value. This is the single rule with the worst possible failure mode.",
+      "specification_is_not_implementation": "Now that this role has code, the risk runs the other way: describing the signer or the election as working when neither is deployed.",
+      "one_copy_of_a_contract": "Contracts live in contracts/ and are implemented once in shared/. A role that restates one creates drift, and drift in a signature-verifying path shows up as a node that verifies on one machine and not another.",
+      "negative_results_belong": "A question the fabric cannot answer is a finding. Record it as an open question rather than smoothing over it — the re-formation paradox exists in the contract precisely because it was written down instead of being quietly assumed away.",
+      "verdicts_are_graded": "Supported, Contradicted, Unproven, Out of scope. 'Unproven' is never reported as 'did not happen'."
+    },
+    "enforcement": "master-node/tests/ — spec and prose-truth tests fail the build on a claim the code does not support. A rule nothing checks is a preference."
+  }
+}

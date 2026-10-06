@@ -3,11 +3,24 @@
 The **Master role** of the Sparknet fabric: the node that holds signing
 authority over the overlay.
 
-> **Status: specified, not built.** This subvault contains contracts,
-> configuration templates, specifications and a prioritized build plan. There
-> is deliberately no `scripts/`, `services/` or `systemd/` directory here yet —
-> nothing would run. Work the backlog in `plans/MASTER_BUILD_PLAN.md`; the
-> first step is to earn the right to create those directories.
+> **Status: built and running its own surface** (build plan Steps 15–18). This
+> role has `scripts/`, `services/` and `systemd/`. It runs the peer's services
+> **by path** rather than copying them, keeps its own hash-chained ledger,
+> generates its own keys into the state directory, has an **isolated signer**
+> for the operational key, and declares an admin surface plus a `MASTERSPIKE`
+> knowledge manifest.
+>
+> What is still genuinely absent, as a numbered step rather than an oversight:
+> **election** — `shared/sparknet-consensus.py` verifies a trust root but does not
+> produce one, so nothing yet makes a node Master. Do not describe it as working.
+> The admin page is likewise *declared*, not bound: nothing listens on
+> `10.100.0.1:8080` yet (`DoD: confirm: user`, Step 18).
+>
+> The signer is **implemented and unit-tested, not deployed**. Its unit exists and
+> is deliberately excluded from `make units`: enabling a process that holds the
+> Master signing key belongs to the election, not to installing the role. It also
+> has never run in a live three-node cluster, so there is no signed registry entry
+> and no key crossing a process boundary in production.
 
 This is a standalone knowledge vault. A session started inside
 `master-node/` resolves to *this* directory as its knowledge base, not to the
@@ -23,6 +36,12 @@ comes from **key possession**, not from a capability grant — a peer holding th
 same capability vocabulary without that key can verify, but can never grant,
 revoke, or escalate.
 
+**A Master is a peer that won an election, not a separate species.** Three nodes
+form the cluster; each holds the same capabilities and runs the same services; one
+additionally holds the operational key and signs. That is the entire difference,
+and it is why this role loads `../peer-node/services/*` by path instead of
+carrying its own versions.
+
 The peer role lives in `../peer-node/` and is implemented.
 
 ## Authority, precisely
@@ -33,7 +52,7 @@ The peer role lives in `../peer-node/` and is implemented.
 | Revoke a node | signs `revoked: true`, removes the peer from its own `wg0` |
 | Register a new peer | adds a `[Peer]` stanza to the Master's `wg0` |
 | Authorize a `guard-apply` | signs an approval payload for one specific peer |
-| Halt the fabric | the cluster KillSwitch (specified, not built) |
+| Halt the fabric | the cluster KillSwitch (specified, still unbuilt) |
 
 None of these are granted through the capability system. The capability
 vocabulary in `../contracts/capabilities.json` governs what a **peer** may do.
@@ -79,12 +98,35 @@ Role-specific trees:
 | Path | Holds |
 |---|---|
 | `configs/wireguard/` | the Master-side `wg0` peer stanza template |
-| `manifests/` | Master identity and registry schema — **not present yet**; it arrives with Step 1, because a Master manifest needs a real signing key |
+| `manifests/` | node identity and the cluster trust root — templates, never live key material |
+| `blockchain/` | the Master's hash-chained ledger (schema is the peer's, not duplicated) |
+| `security/` | key custody, isolation and rotation policy |
 | `docs/` | Master-side specifications |
 | `plans/` | the build backlog and planning notes |
-| `tests/` | specification-conformance tests (no implementation to test yet) |
+| `tests/` | specification-conformance and parity tests |
 
-There is intentionally no `scripts/`, `services/` or `systemd/` yet.
+The executable surface:
+
+| Path | Holds |
+|---|---|
+| `services/` | `sparknet-parity.py` (loads the peer's services by path), `sparknet-ledger.py` (verify only), `sparknet-signer.py` (**the only** process that holds the operational key) |
+| `scripts/` | `sparknet-master-env.sh`, `sparknet-master-keygen.sh` |
+| `systemd/` | parity + ledger units, plus the **signer unit** — which exists but is deliberately *not* in the `make units` set, because enabling a key-holding process is the election's decision, not an install side effect. `make signer-unit` stages it |
+
+Three rules govern that surface:
+
+1. **One copy of the peer's services.** `make parity` prints where each one
+   resolved; `tests/test_master_parity.py` fails the build if a copy appears
+   here. Two copies of a signature-verifying service would drift silently.
+2. **No key material in the vault.** Keys live in `$SPARKNET_STATE_DIR/keys` at
+   0600, referenced by path, and the state dir resolves *outside* this tree
+   (`$XDG_STATE_HOME/sparknet/master-node`). Outside, not just gitignored: the
+   admin surface bind-mounts this vault read-only into an LLM container, so
+   gitignore would not have helped. `make keys-check` enforces both halves.
+3. **Nothing inert.** Every file in those directories must be referenced by a
+   unit or a make target, or the build fails. The signer is what makes this bite:
+   the moment `sparknet-signer.py` existed without a unit, the build failed until
+   the unit did.
 
 ## The contract this role obeys
 
@@ -97,6 +139,10 @@ contract, then update both roles in the same commit, then run
 `../shared/sparknet-authz.py` is the one implementation of the signed
 authorization scheme. This role *signs* with it; a peer *verifies* with it.
 Never copy it here.
+
+`../shared/sparknet-consensus.py` is likewise the single implementation of
+election and trust roots. A node forms **three** distinct Ed25519 keys, and the
+split is the security model rather than a detail — see `security/key-management.md`.
 
 ## Memory Protocol
 
@@ -167,7 +213,15 @@ Run `/wiki-status` first, then `/wiki-ingest`, `/wiki-query`, `/wiki-lint`,
 - **Offensive security is out of scope** for a general/default agent session.
   Route offensive work to the `red` role and defensive work to `blue`.
 - Cite sources. A distilled page without provenance is a guess — mark it as one.
-- **Do not claim live verification.** Nothing on this role runs yet, and the
-  peer's live network behaviour is unverified on the development host.
-- **Distinguish specification from implementation.** This subvault describes
-  what the Master must do. Nothing here should read as though it already does.
+- **Do not claim live verification.** The code on this role is real and tested,
+  but it has never run in a live three-node cluster: no election, no signed
+  registry entry, no key crossing a process boundary. The peer's live network
+  behaviour is likewise unverified on the development host. Say "implemented and
+  unit-tested", never "deployed" or "verified in production".
+- **Distinguish what runs from what is specified.** This role now runs a real
+  surface, so the temptation reverses: describing the signer, election or overlay
+  anchoring as working when they are specified-only. Check the boundary before
+  writing a claim about this role.
+- **Never sign with anything but the operational key**, and never let a peer
+  service load the signer. The admin surface is an LLM application that reads
+  configuration as input; the key is isolated structurally, not by policy.
