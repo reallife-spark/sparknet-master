@@ -18,9 +18,12 @@ authority over the overlay.
 >
 > The signer is **implemented and unit-tested, not deployed**. Its unit exists and
 > is deliberately excluded from `make units`: enabling a process that holds the
-> Master signing key belongs to the election, not to installing the role. It also
-> has never run in a live three-node cluster, so there is no signed registry entry
-> and no key crossing a process boundary in production.
+> Master signing key belongs to the election, not to installing the role. It has
+> now **run in a live local three-node rehearsal** (Step 12): it bound to a root
+> the election formed, answered its own root-id, signed a registry entry that a
+> still-peer verified, and refused the loser's key, an unnamed node and a tampered
+> root. It has still **never run in production** — no real-cluster signed registry
+> entry, no key crossing a process boundary on deployed nodes.
 
 This is a standalone knowledge vault. A session started inside
 `master-node/` resolves to *this* directory as its knowledge base, not to the
@@ -213,9 +216,11 @@ Run `/wiki-status` first, then `/wiki-ingest`, `/wiki-query`, `/wiki-lint`,
 - **Offensive security is out of scope** for a general/default agent session.
   Route offensive work to the `red` role and defensive work to `blue`.
 - Cite sources. A distilled page without provenance is a guess — mark it as one.
-- **Do not claim live verification.** The code on this role is real and tested,
-  but it has never run in a live three-node cluster: no election, no signed
-  registry entry, no key crossing a process boundary. The peer's live network
+- **Do not claim production verification.** The code on this role is real and
+  tested, and the election→signer→registry arc has run in a live **local**
+  three-node rehearsal (Step 12). It has not run **in production**: no deployed
+  election, no deployed signed registry entry, no key crossing a process boundary
+  on real nodes. The peer's live network
   behaviour is likewise unverified on the development host. Say "implemented and
   unit-tested", never "deployed" or "verified in production".
 - **Distinguish what runs from what is specified.** This role now runs a real

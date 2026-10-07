@@ -194,10 +194,11 @@ def check_socket_path(socket_path: str | Path) -> None:
         state = DEFAULT_STATE_DIR.resolve()
     except OSError:
         state = DEFAULT_STATE_DIR
+    path = Path(socket_path)
     try:
-        resolved_parent = socket_path.resolve().parent
+        resolved_parent = path.resolve().parent
     except OSError:
-        resolved_parent = socket_path.parent
+        resolved_parent = path.parent
     if state not in (resolved_parent, *resolved_parent.parents):
         raise SignerError(
             f"refusing socket at {socket_path}: it must live under {state}. A "
@@ -566,6 +567,9 @@ def serve(signer: Signer, socket_path: Path, max_request_bytes: int = 1 << 20) -
     threads would make the ledger's ordering a function of the scheduler; the
     caller is a human approving an action, so there is nothing to gain by racing.
     """
+    # The CLI hands this a string (the scheme check in check_socket_path needs the
+    # unconverted text); normalise here so the transport itself only ever sees a Path.
+    socket_path = Path(socket_path)
     if not hasattr(socket, "AF_UNIX"):  # pragma: no cover - defensive
         raise SignerError(
             "this platform has no unix sockets; refusing to substitute TCP for a key service"

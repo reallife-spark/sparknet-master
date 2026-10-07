@@ -560,6 +560,18 @@ def test_it_accepts_a_socket_inside_the_state_dir(signer_module, tmp_path, monke
     signer_module.check_socket_path(tmp_path / "state" / "signer.sock")
 
 
+def test_it_accepts_a_socket_path_coming_straight_from_argparse(
+    signer_module, tmp_path, monkeypatch
+):
+    """argparse hands check_socket_path an unconverted *string* — that is the
+    documented contract, and a str carries no .resolve(). Regression: the
+    scheme check ran fine and then the Path methods crashed on the str, so the
+    signer could not be started by the CLI at all.
+    """
+    monkeypatch.setattr(signer_module, "DEFAULT_STATE_DIR", tmp_path / "state")
+    signer_module.check_socket_path(str(tmp_path / "state" / "signer.sock"))
+
+
 # --- 3. topology -------------------------------------------------------------
 
 
@@ -697,6 +709,29 @@ def test_it_answers_over_a_unix_socket_and_records_to_the_ledger(
         spec.loader.exec_module(ledger_module)
         ok, detail = ledger_module.verify_chain(ledger)
         assert ok, detail
+    finally:
+        thread.join(timeout=1)
+
+
+def test_the_serve_transport_accepts_a_socket_path_string_as_the_cli_hands_it(
+    signer, tmp_path,
+):
+    """The CLI passes --socket as an unconverted *string*; serve must bind and
+    answer on that shape too. Regression: check_socket_path accepted the string,
+    then serve crashed on str.exists()/os.chmod(str), so the signer could not be
+    started by its own command line at all.
+    """
+    socket_dir = tmp_path / "state" / "signer"
+    socket_dir.mkdir(parents=True)
+    socket_path = str(socket_dir / "signer.sock")
+
+    thread = threading.Thread(target=_serve_forever, args=(signer, socket_path), daemon=True)
+    thread.start()
+    _wait_for_socket(Path(socket_path))
+
+    try:
+        response = _request(Path(socket_path), {"op": "capabilities"})
+        assert response["capabilities"] == ["sign"]
     finally:
         thread.join(timeout=1)
 
