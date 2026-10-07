@@ -28,7 +28,7 @@ After=sparknet-master-ledger.service
 [Service]
 Type=simple
 EnvironmentFile=-%h/.env
-ExecStart=/usr/bin/env python3 %h/services/sparknet-signer.py serve \
+ExecStart=/usr/bin/env python3 %h/services/sparknet-signer.py \
     --node-id ${SPARKNET_NODE_ID} \
     --key ${SPARKNET_STATE_DIR}/keys/operational.ed25519 \
     --root ${SPARKNET_STATE_DIR}/trust-root.json \

@@ -30,6 +30,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -827,6 +829,42 @@ def test_the_signer_is_never_started_by_anything_but_its_own_unit():
         f"more than one unit starts the signer: {starting_the_signer}. Each start "
         f"path is a place the key becomes reachable, and only one has been reviewed"
     )
+
+
+def test_the_signers_systemd_execstart_matches_the_real_cli():
+    """The signer unit's ExecStart must be a command the signer CLI actually parses.
+
+    Regression: the unit called `sparknet-signer.py serve --node-id …`. The CLI
+    has no `serve` subcommand — argparse rejects the stray positional with
+    "unrecognized arguments", so the unit would have failed on the Master host on
+    first start after the election. No suite read this unit, which is how the
+    phantom subcommand survived Step 16, the Step 11 signer work and the Step 12
+    rehearsal (which starts the signer directly, never via systemd).
+    """
+    unit = (ROLE_ROOT / "systemd" / "sparknet-master-signer.service").read_text()
+    lines = unit.splitlines()
+    start = next(
+        i for i, line in enumerate(lines)
+        if line.strip().lower().startswith("execstart=")
+    )
+    block = [lines[start].strip()]
+    while block[-1].endswith("\\"):
+        start += 1
+        block.append(lines[start].strip())
+    joined = " ".join(piece[:-1] if piece.endswith("\\") else piece for piece in block)
+    argv = shlex.split(joined[len("ExecStart="):])
+    # argv[0]=/usr/bin/env argv[1]=python3 argv[2]=the script; the flags follow.
+    substituted = [
+        re.sub(r"\$\{[^}]+\}|%h", "/tmp/opencode/signer-unit-check", arg)
+        for arg in argv[3:]
+    ]
+    # --describe parses the whole flag surface and exits before touching files,
+    # so the check is "argparse accepts the unit's own command line", not a start.
+    result = subprocess.run(
+        [sys.executable, str(SIGNER_PATH), "--describe", *substituted],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_cli_refuses_to_start_without_a_key(tmp_path):
