@@ -3,7 +3,7 @@
 #
 # The master-node half of the election. It runs the same shared member
 # ceremony as a peer — bid, vote, co-sign — because a node that has not cast
-# one of the three votes has no business installing the result of them, and
+# one of the votes has no business installing the result of them, and
 # then installs what formed: --identity flips to role master (if this node won)
 # and the signed root lands in --root-doc (cluster-trust-root.json).
 #

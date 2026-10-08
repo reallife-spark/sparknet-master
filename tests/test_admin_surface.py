@@ -394,9 +394,19 @@ def test_the_admin_port_is_contracted_as_provisioned_not_implemented():
 def test_the_admin_agents_do_not_claim_a_fabric_that_does_not_exist(surface):
     """Prose truth for the agent files.
 
-    An agent is read by an LLM deciding what to do next. One that describes a
-    working election and a deployed signer produces confident, wrong actions —
+    An agent is read by an LLM deciding what to do next. One that describes the
+    fabric as a standing production deployment produces confident, wrong actions —
     and unlike a stale wiki page, its output is acted on immediately.
+
+    The boundary is subtle since 2026-10-07: the election/signer arc has been
+    **proven live** on real hosts (a 2/2 trust root, the signer as
+    ``sparknet-master-signer.service``, a live revocation demo). That proof does
+    not make any of these true **now** for the operator of this role:
+    ``make units`` deliberately excludes the signer unit (enabling a key-holding
+    process is the election's decision, not an install side effect), nothing
+    listens on the admin page yet, and Phase 9's destructive legs remain
+    unexecuted. So the phrases below are still claims an agent must never make
+    as standing facts.
     """
     stale = re.compile(
         r"election (?:is )?(?:working|running|deployed)|"
@@ -408,8 +418,9 @@ def test_the_admin_agents_do_not_claim_a_fabric_that_does_not_exist(surface):
         text = (AGENT_DIR / agent["file"]).read_text()
         match = stale.search(text)
         assert match is None, (
-            f"{agent['file']} claims {match.group(0)!r}. Election is unbuilt and the "
-            f"signer has never been deployed; an agent that says otherwise will be "
+            f"{agent['file']} claims {match.group(0)!r}. The role's signer is not "
+            f"enabled by `make units`, the admin page is not bound, and Phase 9's "
+            f"destructive legs are unexecuted; an agent that says otherwise will be "
             f"acted on."
         )
     # And positively: the limitation must be stated, not merely absent.

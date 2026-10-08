@@ -11,7 +11,8 @@
 #
 # If one key did all three jobs, every node's key would be a key that could sign a
 # registry entry, and every node would be a Master-in-waiting. The cluster key is
-# deliberately weak alone: it helps form a root, and forming a root needs three.
+# deliberately weak alone: it helps form a root, and forming a root needs every
+# member — 2 of 2 in a pair, 3 of 3 in the full cluster.
 #
 # This script contains no cryptography. Key generation lives in
 # ../../shared/sparknet-authz.py and is invoked here, so there is exactly one
@@ -30,7 +31,7 @@
 # pretending it was met.
 #
 # It also cannot make this node master. Generating an operational key does not
-# confer authority: election needs three distinct members' signatures on a cluster
+# confer authority: election needs every member's signature on a cluster
 # trust root, and nothing here can produce one alone.
 set -euo pipefail
 
@@ -97,4 +98,4 @@ echo "keys:   $KEY_DIR  (private 0600, public 0644, never committed)"
 echo "public: *.pub.b64 — safe to publish; cluster_pubkey_b64 goes into the trust root"
 echo
 echo "Generating an operational key does not make this node master."
-echo "Election requires three distinct members' signatures on a cluster trust root."
+echo "Election requires every member's signature on a cluster trust root."

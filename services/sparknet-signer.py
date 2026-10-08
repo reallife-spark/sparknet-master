@@ -213,8 +213,8 @@ def check_root(root: dict[str, Any], consensus: Any, node_id: str) -> None:
     Three separate refusals because they fail for different reasons, and an
     operator seeing one of them learns something different than from the others:
 
-    - invalid: the root is malformed, short of three signatures, or its signatures
-      do not verify against the keys the root itself names;
+    - invalid: the root is malformed, short of the members' signatures, or its
+      signatures do not verify against the keys the root itself names;
     - not-this-node: a perfectly valid root that elected someone else. A
       replacement Master running on the old one hits exactly this;
     - key-mismatch: the valid root names a different operational key than the one
@@ -248,7 +248,7 @@ def check_not_reverted(
     """Refuse to start against a root older than one this node has already served.
 
     A stale root is the hardest case in this file, because on its own it is
-    *valid*: it names this node, it names this key, all three members signed it. If
+    *valid*: it names this node, it names this key, every member signed it. If
     the cluster later re-formed and this node's Master role moved, the old root
     still verifies, so "is this root well-formed" cannot detect the problem.
 

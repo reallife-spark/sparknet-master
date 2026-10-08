@@ -279,9 +279,10 @@ def test_the_manifest_states_the_election_path_actually_implemented(manifest: di
     old one, so a test asserts it names the files that exist.
     """
     election = manifest["election"]
-    assert election["threshold"].startswith("3 of 3"), (
-        "the threshold is 3 of 3 and unanimity is the reason a majority was "
-        "rejected; a different number here would be a consensus change"
+    assert election["threshold"].startswith("2 of 2 or 3 of 3"), (
+        "the threshold is n-of-n — 2 of 2 in a pair, 3 of 3 in the full cluster — "
+        "and unanimity is the reason a majority was rejected; a different number "
+        "here would be a consensus change"
     )
     chain = election["authority_path"]
     for token in ("trust-root.json", "sparknet-signer.py"):

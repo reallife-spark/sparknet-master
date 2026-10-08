@@ -3,27 +3,33 @@
 The **Master role** of the Sparknet fabric: the node that holds signing
 authority over the overlay.
 
-> **Status: built and running its own surface** (build plan Steps 15–18). This
+> **Status: built and running its own surface, and the election/signer arc is
+> proven live on real hosts** (build plan Steps 14–18 + fabric Step 13). This
 > role has `scripts/`, `services/` and `systemd/`. It runs the peer's services
 > **by path** rather than copying them, keeps its own hash-chained ledger,
 > generates its own keys into the state directory, has an **isolated signer**
 > for the operational key, and declares an admin surface plus a `MASTERSPIKE`
 > knowledge manifest.
 >
-> What is still genuinely absent, as a numbered step rather than an oversight:
-> **election** — `shared/sparknet-consensus.py` verifies a trust root but does not
-> produce one, so nothing yet makes a node Master. Do not describe it as working.
-> The admin page is likewise *declared*, not bound: nothing listens on
-> `10.100.0.1:8080` yet (`DoD: confirm: user`, Step 18).
+> The consensus/election arc is **built and was proven live 2026-10-07**:
+> `shared/sparknet-consensus.py` produces *and* verifies roots (Step 14); the
+> two real hosts agx64/agx32 co-formed a 2/2 trust root naming agx64 Master
+> over the deployed transport, and the signer ran in production as
+> `sparknet-master-signer.service` on agx64 — it answered its own root-id,
+> signed a live registry entry a still-peer verified, survived a real reboot,
+> refused non-Master keys/unnamed nodes/tampered roots, and demonstrated a
+> live revoke→peer-inert→re-authorize cycle.
 >
-> The signer is **implemented and unit-tested, not deployed**. Its unit exists and
-> is deliberately excluded from `make units`: enabling a process that holds the
-> Master signing key belongs to the election, not to installing the role. It has
-> now **run in a live local three-node rehearsal** (Step 12): it bound to a root
-> the election formed, answered its own root-id, signed a registry entry that a
-> still-peer verified, and refused the loser's key, an unnamed node and a tampered
-> root. It has still **never run in production** — no real-cluster signed registry
-> entry, no key crossing a process boundary on deployed nodes.
+> Still genuinely open: the admin page is *declared*, not bound — nothing
+> listens on `10.100.0.1:8080` yet (`DoD: confirm: user`, Step 18). Phase 9's
+> destructive legs (rollback; replace-Master re-formation with a new nonce)
+> are documented in `contracts/deployment-runbook.md` and deliberately left
+> unexecuted by operator decision — do not describe them as run. The signer
+> unit stays excluded from `make units` by design: enabling a process that
+> holds the Master signing key belongs to the election, not the role install.
+> The one deploy-time caveat recorded: the overlay doesn't survive reboot on
+> the tegra host (`CONFIG_WIREGUARD=n`; userspace `wireguard-go`), restored
+> with `/root/scripts/sparknet-wg-restore.sh` — a Phase 9/ops item.
 
 This is a standalone knowledge vault. A session started inside
 `master-node/` resolves to *this* directory as its knowledge base, not to the
@@ -39,11 +45,11 @@ comes from **key possession**, not from a capability grant — a peer holding th
 same capability vocabulary without that key can verify, but can never grant,
 revoke, or escalate.
 
-**A Master is a peer that won an election, not a separate species.** Three nodes
-form the cluster; each holds the same capabilities and runs the same services; one
-additionally holds the operational key and signs. That is the entire difference,
-and it is why this role loads `../peer-node/services/*` by path instead of
-carrying its own versions.
+**A Master is a peer that won an election, not a separate species.** A cluster is
+a pair or a trio; each member holds the same capabilities and runs the same
+services; one additionally holds the operational key and signs. That is the
+entire difference, and it is why this role loads `../peer-node/services/*` by
+path instead of carrying its own versions.
 
 The peer role lives in `../peer-node/` and is implemented.
 
@@ -105,7 +111,7 @@ Role-specific trees:
 | `blockchain/` | the Master's hash-chained ledger (schema is the peer's, not duplicated) |
 | `security/` | key custody, isolation and rotation policy |
 | `docs/` | Master-side specifications |
-| `plans/` | the build backlog and planning notes |
+| `plans/` | the build backlog and planning notes; also the master architecture blueprint and pre-split planning docs (architecture, deployment summary, viability/checklist, EU AI Act, BOMs) |
 | `tests/` | specification-conformance and parity tests |
 
 The executable surface:
