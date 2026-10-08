@@ -69,6 +69,8 @@ import os
 import socket
 import stat
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -95,6 +97,14 @@ def _default_state_dir() -> Path:
 
 
 DEFAULT_STATE_DIR = _default_state_dir()
+
+#: How long one request may take to arrive before the signer answers
+#: ``{"ok": false, "error": "timeout"}`` and closes that connection. The bound is
+#: per-connection, not per-byte: a client that connects and never finishes a line
+#: is the one failure mode the accept loop cannot absorb, so a trickle of bytes
+#: must not be able to stretch the wait indefinitely. 30 s is generous for a
+#: local, interactive, unix-socket peer.
+REQUEST_READ_TIMEOUT_SECONDS = 30.0
 
 #: The signer's entire capability set. One entry, and it is not negotiable at
 #: runtime. If a future need appears — say, the signer also decrypting backups —
@@ -320,7 +330,8 @@ def record_signature(
     The ledger is written with `O_APPEND`-style exclusive create and a 0600 mode,
     and the write is a single `write()` of one line, because the alternative — read
     the ledger, append in memory, rewrite the file — loses entries if two
-    requests land together. Requests are serialised by the socket loop, and the
+    requests land together. Requests are serialised by the signer lock (one lock
+    around `Signer.handle` in the transport), and the
     signature over the block covers the previous hash, so a lost block is visible
     as a broken chain rather than invisible.
 
@@ -559,13 +570,30 @@ class Signer:
 # --- transport ---------------------------------------------------------------
 
 
-def serve(signer: Signer, socket_path: Path, max_request_bytes: int = 1 << 20) -> None:
-    """One JSON object per line, serialised. No concurrency, by design.
+def serve(
+    signer: Signer,
+    socket_path: Path,
+    max_request_bytes: int = 1 << 20,
+    read_timeout: float = REQUEST_READ_TIMEOUT_SECONDS,
+) -> None:
+    """One JSON object per line; each connection served on its own thread.
 
-    Single-threaded is the point, not a simplification. The signer appends to a
-    hash chain, and the order blocks land in is part of what the chain attests. Two
-    threads would make the ledger's ordering a function of the scheduler; the
-    caller is a human approving an action, so there is nothing to gain by racing.
+    This replaces the original single-threaded loop. A silent client used to
+    hold the whole signer: the accept loop blocked in ``recv`` on the first
+    connection, so every later request queued behind one stalled caller. Now:
+
+    * every connection is read on its own daemon thread, so a second client is
+      served while the first is still connected and silent;
+    * every read is bounded by ``read_timeout``, and the bound is deadline-based,
+      so trickling one byte at a time does not stretch it (bytes are bound
+      separately by ``max_request_bytes``);
+    * a client that exceeds the bound is answered ``{"ok": false,
+      "error": "timeout"}`` and closed;
+    * ``signer.handle`` is still serialised by one lock. The signer appends to a
+      hash chain, and the order blocks land in is part of what the chain attests;
+      the lock keeps that order a strict total order. One process still holds the
+      key, and one request still mutates the ledger at a time — the difference is
+      simply that a stalled caller no longer blocks the whole signer.
     """
     # The CLI hands this a string (the scheme check in check_socket_path needs the
     # unconverted text); normalise here so the transport itself only ever sees a Path.
@@ -577,6 +605,7 @@ def serve(signer: Signer, socket_path: Path, max_request_bytes: int = 1 << 20) -
     if socket_path.exists():
         socket_path.unlink()
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sign_lock = threading.Lock()
     try:
         server.bind(str(socket_path))
         # 0600 on the socket itself: the peer surface runs as the same uid on most
@@ -585,44 +614,92 @@ def serve(signer: Signer, socket_path: Path, max_request_bytes: int = 1 << 20) -
         server.listen(8)
         while True:
             connection, _ = server.accept()
-            with connection:
-                _serve_one(signer, connection, max_request_bytes)
+            threading.Thread(
+                target=_serve_one,
+                args=(signer, connection, max_request_bytes, read_timeout, sign_lock),
+                name="signer-client",
+                daemon=True,
+            ).start()
     finally:
         server.close()
         if socket_path.exists():
             socket_path.unlink()
 
 
-def _serve_one(signer: Signer, connection: socket.socket, max_request_bytes: int) -> None:
-    """Read one line, answer once, close.
+class _ReadTimeout(Exception):
+    """The client did not finish its line before the read deadline."""
 
-    The size cap is a memory bound, not politeness: an unbounded `recv` loop is a
-    way for a caller to make this process hold a gigabyte before parsing it.
-    """
+
+class _RequestTooLarge(Exception):
+    """The client's line exceeded the per-request size cap."""
+
+
+def _read_line(
+    connection: socket.socket, max_request_bytes: int, read_timeout: float
+) -> bytes:
+    """One line. Deadline-based, so a trickle of bytes does not reset the clock."""
+    deadline = time.monotonic() + read_timeout
     buffered = b""
     while b"\n" not in buffered:
-        chunk = connection.recv(4096)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise _ReadTimeout()
+        connection.settimeout(remaining)
+        try:
+            chunk = connection.recv(4096)
+        except TimeoutError:
+            raise _ReadTimeout() from None
         if not chunk:
-            return
+            return b""
         buffered += chunk
         if len(buffered) > max_request_bytes:
+            raise _RequestTooLarge()
+    return buffered.split(b"\n", 1)[0]
+
+
+def _serve_one(
+    signer: Signer,
+    connection: socket.socket,
+    max_request_bytes: int,
+    read_timeout: float,
+    sign_lock: threading.Lock,
+) -> None:
+    """Read one line, answer once, close. Runs in a per-connection thread.
+
+    The size cap is a memory bound, not politeness: an unbounded `recv` loop is a
+    way for a caller to make this process hold a gigabyte before parsing it. The
+    read deadline (``read_timeout``) is the bound on silence: without it a
+    connected-but-silent client would hold this thread's slot forever.
+    """
+    with connection:
+        try:
+            line = _read_line(connection, max_request_bytes, read_timeout)
+        except _ReadTimeout:
+            connection.settimeout(None)
+            _send(connection, {"ok": False, "error": "timeout"})
+            return
+        except _RequestTooLarge:
+            connection.settimeout(None)
             _send(connection, {"ok": False, "error": "request exceeds the size limit"})
             return
+        if not line:
+            return  # peer closed without a full line
+        connection.settimeout(None)
 
-    line = buffered.split(b"\n", 1)[0]
-    try:
-        request = json.loads(line.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        _send(connection, {"ok": False, "error": f"malformed JSON: {exc}"})
-        return
+        try:
+            request = json.loads(line.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            _send(connection, {"ok": False, "error": f"malformed JSON: {exc}"})
+            return
 
-    try:
-        response = signer.handle(request)
-    except Exception as exc:  # noqa: BLE001 - one bad request must not kill the signer
-        # The signer stays up. A process that exits on a malformed request turns a
-        # bug in a caller into a cluster-wide loss of signing.
-        response = {"ok": False, "error": f"internal error: {exc}"}
-    _send(connection, response)
+        with sign_lock:
+            try:
+                response = signer.handle(request)
+            except Exception as exc:  # noqa: BLE001 - one bad request must not kill the signer
+                # The signer stays up. A process that exits on a malformed request turns a
+                # bug in a caller into a cluster-wide loss of signing.
+                response = {"ok": False, "error": f"internal error: {exc}"}
+        _send(connection, response)
 
 
 def _send(connection: socket.socket, payload: dict[str, Any]) -> None:

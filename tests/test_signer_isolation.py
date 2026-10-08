@@ -36,6 +36,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -738,6 +739,182 @@ def test_the_serve_transport_accepts_a_socket_path_string_as_the_cli_hands_it(
         thread.join(timeout=1)
 
 
+def test_a_second_connection_is_served_while_the_first_is_silent(signer, tmp_path):
+    """DoD (2): a connected-but-silent client must not queue later clients.
+
+    The serve loop reads every connection on its own thread, so the second
+    connection's request completes without waiting for the first connection's
+    read deadline. The silent client is given a generous 3 s bound: if the
+    transport were still serial, the second request would sit behind the sleeping
+    connection for all 3 s before being answered.
+    """
+    socket_dir = tmp_path / "state" / "signer"
+    socket_dir.mkdir(parents=True)
+    socket_path = socket_dir / "signer.sock"
+    thread = threading.Thread(
+        target=_serve_forever,
+        args=(signer, socket_path),
+        kwargs={"read_timeout": 3.0},
+        daemon=True,
+    )
+    thread.start()
+    _wait_for_socket(socket_path)
+    try:
+        silent = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        silent.connect(str(socket_path))
+        try:
+            started = time.monotonic()
+            response = _request(
+                socket_path,
+                {"op": "sign-registry-entry", "root_id": signer.root_id, "entry": _entry()},
+            )
+            elapsed = time.monotonic() - started
+        finally:
+            silent.close()
+        assert response["ok"], response
+        assert response["entry"]["signature_b64"]
+        assert elapsed < 0.75, f"second client waited {elapsed:.2f}s behind a silent one"
+    finally:
+        thread.join(timeout=0.3)
+
+
+def test_a_silent_client_is_answered_timeout_and_closed(signer, tmp_path):
+    """DoD (1): a client that connects and never sends a line is answered
+    `{"ok": false, "error": "timeout"}` and closed within the read bound instead
+    of holding a connection (and, under serialisation, the whole signer) forever.
+    """
+    socket_dir = tmp_path / "state" / "signer"
+    socket_dir.mkdir(parents=True)
+    socket_path = socket_dir / "signer.sock"
+    thread = threading.Thread(
+        target=_serve_forever,
+        args=(signer, socket_path),
+        kwargs={"read_timeout": 0.3},
+        daemon=True,
+    )
+    thread.start()
+    _wait_for_socket(socket_path)
+    try:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(str(socket_path))
+        started = time.monotonic()
+        client.settimeout(5.0)
+        buffered = b""
+        while b"\n" not in buffered:
+            chunk = client.recv(4096)
+            if not chunk:
+                break
+            buffered += chunk
+        elapsed = time.monotonic() - started
+        client.close()
+        assert json.loads(buffered) == {"ok": False, "error": "timeout"}
+        assert 0.05 <= elapsed < 3.0, f"timeout was not bounded, took {elapsed:.2f}s"
+    finally:
+        thread.join(timeout=0.3)
+
+
+def test_two_concurrent_requests_serialise_into_one_intact_chain(signer, tmp_path):
+    """DoD (3): the single-key invariant survives concurrency.
+
+    Two requests signed back-to-back over the socket land as two signature_issued
+    blocks in total — the signer lock serialises the handle, so no block is lost
+    to a read-modify-write race and order is a strict total order — each chaining
+    to the previous, and the production ledger verifier accepts the result.
+    """
+    socket_dir = tmp_path / "state" / "signer"
+    socket_dir.mkdir(parents=True)
+    socket_path = socket_dir / "signer.sock"
+    thread = threading.Thread(
+        target=_serve_forever,
+        args=(signer, socket_path),
+        kwargs={"read_timeout": 3.0},
+        daemon=True,
+    )
+    thread.start()
+    _wait_for_socket(socket_path)
+    try:
+        responses: list = []
+        responses_lock = threading.Lock()
+
+        def _sign() -> None:
+            response = _request(
+                socket_path,
+                {"op": "sign-registry-entry", "root_id": signer.root_id, "entry": _entry()},
+            )
+            with responses_lock:
+                responses.append(response)
+
+        requesters = [threading.Thread(target=_sign) for _ in range(2)]
+        for requester in requesters:
+            requester.start()
+        for requester in requesters:
+            requester.join(timeout=5.0)
+        assert all(response["ok"] for response in responses), responses
+
+        ledger = json.loads((tmp_path / "ledger.json").read_text())
+        blocks = ledger["blocks"]
+        assert [block["data"]["event"] for block in blocks] == [
+            "signature_issued",
+            "signature_issued",
+        ]
+        assert blocks[0]["prev_hash"] == ""
+        assert blocks[1]["prev_hash"] == blocks[0]["hash"]
+
+        spec = importlib.util.spec_from_file_location(
+            "ledger_for_concurrency", ROLE_ROOT / "services" / "sparknet-ledger.py"
+        )
+        ledger_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ledger_module)
+        ok, detail = ledger_module.verify_chain(ledger)
+        assert ok, detail
+    finally:
+        thread.join(timeout=0.3)
+
+
+def test_concurrent_requests_never_run_handle_twice_at_once(signer, tmp_path):
+    """DoD (3), made deterministic: the transport serialises Handle calls.
+
+    The real-signer chain test above proves the ledger survives real races, but
+    that race only *sometimes* loses a block under the GIL. This test makes the
+    corruption impossible to miss: a fake signer whose `handle` sleeps while
+    counting how many callers are inside it. If the transport really serialises,
+    the events alternate enter/exit and `max_inside` stays 1; if the lock is
+    removed the sleep forces both calls inside at once and the assertion fails
+    every run, not occasionally.
+    """
+    socket_dir = tmp_path / "state" / "signer"
+    socket_dir.mkdir(parents=True)
+    socket_path = socket_dir / "signer.sock"
+    thread = threading.Thread(
+        target=_serve_forever,
+        args=(_serialisable_signer := _SerialisingSigner(), socket_path),
+        kwargs={"read_timeout": 3.0},
+        daemon=True,
+    )
+    thread.start()
+    _wait_for_socket(socket_path)
+    try:
+        requesters = [
+            threading.Thread(target=_request, args=(socket_path, {"op": "anything"}))
+            for _ in range(2)
+        ]
+        for requester in requesters:
+            requester.start()
+        for requester in requesters:
+            requester.join(timeout=5.0)
+        with _serialisable_signer.monitor:
+            assert _serialisable_signer.events == [
+                ("enter", 1),
+                ("exit", 0),
+                ("enter", 1),
+                ("exit", 0),
+            ], _serialisable_signer.events
+            assert _serialisable_signer.max_inside == 1
+            assert _serialisable_signer.answers == 2
+    finally:
+        thread.join(timeout=0.3)
+
+
 def test_two_signatures_chain_on_top_of_each_other(signer, tmp_path, authz, consensus):
     """Ledger order is part of what the chain attests, so prev_hash must advance."""
     first = signer.handle(
@@ -765,7 +942,34 @@ def test_a_refused_request_writes_nothing_to_the_ledger(signer, tmp_path):
 # --- helpers -----------------------------------------------------------------
 
 
-def _serve_forever(signer, socket_path: Path) -> None:
+class _SerialisingSigner:
+    """A `handle` that sleeps, so two concurrent calls must overlap unless the
+    transport serialises them. Only `.handle` is used, so this stands in for the
+    real signer at the transport level."""
+
+    def __init__(self) -> None:
+        self.monitor = threading.Lock()
+        self.inside = 0
+        self.max_inside = 0
+        self.answers = 0
+        self.events: list[tuple[str, int]] = []
+
+    def handle(self, request: dict) -> dict:
+        with self.monitor:
+            self.inside += 1
+            self.max_inside = max(self.max_inside, self.inside)
+            self.events.append(("enter", self.inside))
+        time.sleep(0.05)
+        with self.monitor:
+            self.inside -= 1
+            self.answers += 1
+            self.events.append(("exit", self.inside))
+        return {"ok": True}
+
+
+def _serve_forever(
+    signer, socket_path: Path, *, read_timeout: float | None = None
+) -> None:
     import importlib.util as _u
 
     spec = _u.spec_from_file_location("signer_serve_helper", SIGNER_PATH)
@@ -773,7 +977,10 @@ def _serve_forever(signer, socket_path: Path) -> None:
     sys.modules["signer_serve_helper"] = module
     spec.loader.exec_module(module)
     try:
-        module.serve(signer, socket_path)
+        if read_timeout is None:
+            module.serve(signer, socket_path)
+        else:
+            module.serve(signer, socket_path, read_timeout=read_timeout)
     except OSError:
         pass
 
