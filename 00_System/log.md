@@ -8,3 +8,9 @@ forward. The root `log.md` is a symlink to this file.
   category dirs became symlinks into `00_System`–`07_Archives`;
   `02_Daily/2026-10-05.md` holds the session note that used to live at
   `sessions/`.
+- [2026-10-08] MEMORY master `02_Daily/` cleared by operator decision — this
+  development's sessions live exclusively in the fabric root's `sessions/` (the
+  master build timeline was folded into `../sessions/2026-10-05.md` before
+  removal). Role `02_Daily/` stays empty until the master's own main is opened
+  and used. The role also gains its own `.opencode/agents/chat.md` (read-only
+  chat over this vault), mirroring the fabric root's config.
