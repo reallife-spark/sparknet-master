@@ -17,6 +17,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --registry) REGISTRY="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
+    -h|--help)  usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage; exit 1 ;;
   esac
 done

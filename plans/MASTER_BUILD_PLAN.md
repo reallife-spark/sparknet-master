@@ -1,6 +1,6 @@
 ---
 title: sparknet master-node Build Plan
-updated: 2026-10-06
+updated: 2026-10-08
 current: 2
 ---
 
@@ -11,9 +11,10 @@ current: 2
 > file back **immediately** on every advance; append the matching transition
 > line to `log.md`.
 >
-> **No `scripts/`, `services/` or `systemd/` directory exists yet, by design.**
-> Step 3 is where that stops being true. Steps 1 and 2 are deliberately
-> knowledge-and-contract work that needs no code.
+> **As of Step 3 these directories exist** (`scripts/`, `services/`,
+> `systemd/` — built Steps 3–4 and 15–18; the isolated signer runs live on
+> agx64). Steps 1 and 2 remain deliberately knowledge-and-contract work that
+> needs no code; the cursor sits at Step 2.
 
 ## Status Legend
 
@@ -693,6 +694,34 @@ containment and scheduling.
         already said Steps 1–4 assume a Master that 13–14 had not yet produced.
         Election itself lives in the fabric plan (root `PLAN.md` Step 11), not
         here — this role consumes it.
+
+## Step 20 — Signer liveness: client timeouts and a non-blocking accept loop
+
+- [ ] **Step 20** — Recorded from live evidence, not built. The isolated signer's
+      serve loop accepts one connection at a time and `_serve_one` blocks in
+      `recv` with **no read timeout**: a client that connects and never sends a
+      complete line holds the accept loop forever, so every later signing
+      request queues behind one stalled caller. `listen(8)` hides it (the
+      backlog absorbs the symptom) until it does not. The rehearsal on
+      2026-10-07 noted it in passing; it was left unbuilt deliberately — the
+      live pair's callers are well-behaved local processes, and the fix touches
+      the one process that must never be restarted casually.
+      - **DoD**: (1) a per-client read timeout that answers
+        `{"ok": false, "error": "timeout"}` and closes, so a silent client
+        costs bounded time instead of the whole signer; (2) a second concurrent
+        client is served while the first is still connected and silent —
+        proved by a test that opens a hung connection, then a real one, and
+        gets an answer on the second; (3) the single-key-holder invariant
+        survives the concurrency (the operational key is used under a lock, or
+        requests are serialised — chosen and justified in the step, not
+        implied); (4) `make test-all` and `make lint` green, and the signer's
+        existing signature/containment tests unchanged in behaviour.
+        **DoD: confirm: user** — deployment of a changed signer to the live
+        pair is an operator decision, taken when the step is built.
+      - **Status**: not started (recorded 2026-10-08, fabric PLAN Step 14
+        review). Cursor stays at Step 2: this step is hardening of something
+        already running, not a dependency of anything unbuilt, so it must not
+        pull the plan cursor forward.
 
 ## Sequencing note
 

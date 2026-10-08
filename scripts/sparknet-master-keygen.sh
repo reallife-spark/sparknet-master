@@ -35,6 +35,31 @@
 # trust root, and nothing here can produce one alone.
 set -euo pipefail
 
+# --help BEFORE the environment is sourced and before anything derives a key:
+# without this guard, `keygen --help` ran the whole script — on a machine with
+# no keys yet it would have GENERATED them while answering a help request.
+case "${1:-}" in
+  -h|--help)
+    cat <<'USAGE'
+sparknet-master-keygen.sh — generate this node's three Ed25519 keypairs
+
+Usage:
+  scripts/sparknet-master-keygen.sh          create missing keys (idempotent)
+  scripts/sparknet-master-keygen.sh --help    print this text and exit
+
+Keys land in $SPARKNET_STATE_DIR/keys (mode 0600, outside the vault):
+  cluster      signs a cluster trust root (every member has one)
+  operational  signs registry entries (elected Master's signer only)
+  identity     signs this node's own authorization envelope
+
+Existing keys are left alone; generation delegates to
+shared/sparknet-authz.py so there is one implementation of key creation.
+Generating an operational key confers no authority — election needs every
+member's signature on a cluster trust root.
+USAGE
+    exit 0 ;;
+esac
+
 ROLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=./sparknet-master-env.sh
 . "$ROLE_ROOT/scripts/sparknet-master-env.sh" >/dev/null
