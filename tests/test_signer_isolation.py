@@ -897,6 +897,28 @@ def test_a_silent_client_is_answered_timeout_and_closed(signer, tmp_path):
         thread.join(timeout=0.3)
 
 
+def test_read_line_treats_socket_timeout_as_the_read_deadline(signer_module):
+    """The 3.9/3.10 timeout-class split must not turn a silent client into a bare EOF.
+
+    On Python 3.9 `socket.timeout` and `TimeoutError` are distinct classes, so a
+    transport that catches only `TimeoutError` lets the socket timeout escape:
+    the serving thread dies and the client sees an empty close instead of
+    `{"ok": false, "error": "timeout"}`. `_read_line` must translate *both* into
+    its own `_ReadTimeout`. The fake raises the class the stdlib actually raises,
+    so on a 3.9 interpreter this fails unless `socket.timeout` is named too.
+    """
+
+    class _SilentSocket:
+        def settimeout(self, _value):  # the deadline logic sets this before recv
+            pass
+
+        def recv(self, _size):
+            raise socket.timeout("timed out")  # noqa: UP041 - the class 3.9 raises
+
+    with pytest.raises(signer_module._ReadTimeout):
+        signer_module._read_line(_SilentSocket(), 1 << 20, 0.5)
+
+
 def test_two_concurrent_requests_serialise_into_one_intact_chain(signer, tmp_path):
     """DoD (3): the single-key invariant survives concurrency.
 

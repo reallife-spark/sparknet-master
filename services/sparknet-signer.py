@@ -663,7 +663,11 @@ def _read_line(
         connection.settimeout(remaining)
         try:
             chunk = connection.recv(4096)
-        except TimeoutError:
+        except (TimeoutError, socket.timeout):  # noqa: UP041 - distinct on ≤3.9
+            # `socket.timeout` and `TimeoutError` are the same class only from
+            # Python 3.10; on the 3.9 hosts this fabric deploys to they are
+            # distinct, so both must be named or the timeout escapes, kills the
+            # thread, and the client sees a bare EOF instead of the refusal.
             raise _ReadTimeout() from None
         if not chunk:
             return b""
