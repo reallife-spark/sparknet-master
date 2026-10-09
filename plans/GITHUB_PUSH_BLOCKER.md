@@ -1,5 +1,21 @@
 # GitHub Push Blocker (Phase 1)
 
+## RESOLVED 2026-10-09
+
+Pushed `main` (12 commits, `d901c8f..4e276df`) to the correct private remote
+`https://github.com/reallife-spark/sparknet.git`.
+
+- **Wrong repo first**: the remote had drifted to `reallife-spark/SparkNet-Node`.
+  By operator decision it was renamed back to `reallife-spark/sparknet`
+  (`gh repo rename sparknet --repo reallife-spark/SparkNet-Node`), preserving
+  history; the local `origin` URL was corrected to match.
+- **Credential**: `gh` **is** installed at `~/.local/bin/gh` (v2.102.0) and
+  authenticated as `reallife-spark`. The "no gh" symptom was only that
+  `~/.local/bin` is absent from a non-interactive `PATH`, so the repo-local
+  helper `!gh auth git-credential` could not resolve. Push with
+  `PATH="$HOME/.local/bin:$PATH" git push origin main`.
+- The plaintext-credential history below still stands as a security record.
+
 ## Issue
 Attempted to push sparknet to https://github.com/reallife-spark/sparknet.git using provided credentials.
 
