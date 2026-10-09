@@ -270,9 +270,12 @@ def check_not_reverted(
     deliberate act with a word for it, rather than a thing you can do by editing a
     file.
 
-    Re-formation *forward* is unaffected: a genuinely newer root has a different
-    id too, so it needs the same flag — correctly, because adopting a new root is
-    exactly the moment worth being deliberate about.
+    Re-formation *forward* is the chain (policy B): a root whose
+    `previous_root_id` names the ledger's root in force descends-monotonically
+    from it, so it is provably newer than what this signer signed under, and is
+    adopted without the flag. The chain is what makes forward adoption
+    automatic, so the flag is left for the cases the chain cannot prove —
+    a rollback, or a jump to a root with no lineage to the ledger's last one.
     """
     if not ledger_path.is_file():
         return
@@ -285,22 +288,35 @@ def check_not_reverted(
         ) from exc
 
     incoming = consensus.root_id(root)
-    seen = {
+    ledgers = [
         block.get("data", {}).get("root_id")
         for block in ledger.get("blocks", [])
         if isinstance(block, dict)
-    }
-    previous = {root_id for root_id in seen if root_id and root_id != incoming}
-    if not previous:
+    ]
+    ledgers = [root_id for root_id in ledgers if root_id]
+    if not ledgers:
+        return
+    in_force = ledgers[-1]
+    if incoming == in_force:
+        return
+    if (
+        not allow_requalification
+        and consensus.canonical_root(root)["previous_root_id"] == in_force
+    ):
+        # Chained re-formation, policy B: this root names the ledger's root in
+        # force as its parent, so it is provably newer than anything this signer
+        # has signed under — forward adoption, not a revert. The chain is the
+        # `--accept-requalification` decision now made by the protocol instead
+        # of a human flag, which is the point of re-formation.
         return
     if allow_requalification:
         return
-    listed = ", ".join(sorted(r[:16] + "..." for r in previous))
+    listed = ", ".join(sorted({r[:16] + "..." for r in ledgers}))
     raise SignerError(
         f"this node has already signed under root(s) {listed}, but was started "
-        f"with {incoming[:16]}... . Pointing a signer at a different root than the "
-        f"one already in force is a re-formation or a revert, and both must be "
-        f"explicit: re-run with --accept-requalification if that is what you mean."
+        f"with a root ({incoming[:16]}...) that neither matches the root in "
+        f"force nor names it as previous_root_id (chained re-formation). "
+        f"--accept-requalification makes this deliberate."
     )
 
 

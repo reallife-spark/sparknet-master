@@ -106,7 +106,9 @@ def _keypair(seed: str) -> tuple[str, str]:
 MASTER = "alpha"
 
 
-def _unsigned_root(master: str = MASTER, nonce: str = "root-1") -> dict:
+def _unsigned_root(
+    master: str = MASTER, nonce: str = "root-1", previous_root_id: str = ""
+) -> dict:
     """A root's claims, with no signatures yet.
 
     Built unsigned on purpose. An earlier version returned a *signed* root, and the
@@ -125,12 +127,13 @@ def _unsigned_root(master: str = MASTER, nonce: str = "root-1") -> dict:
             }
         )
     return {
-        "version": "1.0",
+        "version": "1.1",
         "nonce": nonce,
         "formed_at": CLOCK.isoformat(),
         "members": members,
         "master_node_id": master,
         "master_pubkey": _keypair(f"operational-{master}")[1],
+        "previous_root_id": previous_root_id,
     }
 
 
@@ -147,8 +150,12 @@ def _sign(consensus, root: dict, cluster_key_seed: str = "cluster") -> dict:
     return consensus.merge_root_signatures(root, maps)
 
 
-def _valid_root(consensus, master: str = MASTER, nonce: str = "root-1") -> dict:
-    return _sign(consensus, _unsigned_root(master=master, nonce=nonce))
+def _valid_root(
+    consensus, master: str = MASTER, nonce: str = "root-1", previous_root_id: str = ""
+) -> dict:
+    return _sign(
+        consensus, _unsigned_root(master=master, nonce=nonce, previous_root_id=previous_root_id)
+    )
 
 
 @pytest.fixture
@@ -297,9 +304,11 @@ def test_restarting_under_the_same_root_is_not_a_revert(signer_module, operation
 def test_it_refuses_to_be_pointed_back_at_a_superseded_root(signer_module, operational_key, authz, consensus, tmp_path):
     """The real revert: the cluster re-formed, and someone points the signer back.
 
-    A valid root alone cannot detect this — the old root still verifies. The ledger
-    is what remembers which root was in force, and a *different* id than the one
-    already recorded means the Master role has moved.
+    A valid root alone cannot detect this — the old root still verifies. The
+    chain and the ledger together are what remember which root is in force: a
+    *different* id than the one already recorded means the Master role has
+    moved, and unless that id descends from the ledger's last root the change
+    is a stranger or a trip backward, not a re-formation.
     """
     key_path, _ = operational_key
     old_root = _valid_root(consensus, nonce="root-old")
@@ -365,6 +374,81 @@ def test_requalification_is_possible_but_must_be_asked_for(
         block["data"]["root_id"] for block in json.loads(ledger.read_text())["blocks"]
     }
     assert roots_in_ledger == {first.root_id, requalified.root_id}
+
+
+def test_a_chained_descendant_root_is_adopted_without_the_flag(
+    signer_module, operational_key, authz, consensus, tmp_path
+):
+    """Re-formation forward (policy B) needs no flag: the chain proves direction.
+
+    A descendant root names the ledger's root in force as its `previous_root_id`.
+    That parentage is a signed ordering inside the root itself, so the signer can
+    adopt it knowing it is provably newer — the `--accept-requalification` word is
+    no longer needed for the case the protocol can prove.
+    """
+    key_path, _ = operational_key
+    genesis_root = _valid_root(consensus, nonce="root-genesis")
+    ledger = tmp_path / "ledger.json"
+
+    first = signer_module.Signer(
+        MASTER, key_path, genesis_root, authz, consensus, ledger, clock=lambda: CLOCK
+    )
+    first.handle(
+        {"op": "sign-registry-entry", "root_id": first.root_id, "entry": _entry()}
+    )
+
+    descendant = _valid_root(
+        consensus, nonce="root-reformed", previous_root_id=consensus.root_id(genesis_root)
+    )
+    adopted = signer_module.Signer(
+        MASTER, key_path, descendant, authz, consensus, ledger, clock=lambda: CLOCK
+    )
+    assert adopted.root_id != first.root_id, "the descendant is a new root, not the held one"
+    assert consensus.canonical_root(descendant)["previous_root_id"] == first.root_id
+    assert adopted.handle(
+        {"op": "sign-registry-entry", "root_id": adopted.root_id, "entry": _entry()}
+    )["ok"]
+
+
+def test_a_descent_forward_then_a_revert_back_is_still_refused(
+    signer_module, operational_key, authz, consensus, tmp_path
+):
+    """The chain protects the ledger's forward edge; the ledger protects the past.
+
+    After adopting the descendant, pointing the signer back at the genesis root is
+    the same old revert — the descendant is what the ledger last saw, and the
+    genesis root does not descend from it. The chain and the ledger have to agree
+    for adoption; refusing a step backward is the joint consequence of both.
+    """
+    key_path, _ = operational_key
+    genesis_root = _valid_root(consensus, nonce="root-genesis")
+    descendant = _valid_root(
+        consensus, nonce="root-reformed", previous_root_id=consensus.root_id(genesis_root)
+    )
+    ledger = tmp_path / "ledger.json"
+
+    first = signer_module.Signer(
+        MASTER, key_path, genesis_root, authz, consensus, ledger, clock=lambda: CLOCK
+    )
+    first.handle(
+        {"op": "sign-registry-entry", "root_id": first.root_id, "entry": _entry()}
+    )
+    adopted = signer_module.Signer(
+        MASTER, key_path, descendant, authz, consensus, ledger, clock=lambda: CLOCK
+    )
+    assert adopted.handle(
+        {"op": "sign-registry-entry", "root_id": adopted.root_id, "entry": _entry()}
+    )["ok"]
+
+    with pytest.raises(signer_module.SignerError, match="already signed under root"):
+        signer_module.Signer(
+            MASTER, key_path, genesis_root, authz, consensus, ledger, clock=lambda: CLOCK
+        )
+    with pytest.raises(signer_module.SignerError, match="accept-requalification"):
+        signer_module.Signer(
+            MASTER, key_path, _valid_root(consensus, nonce="root-stranger"),
+            authz, consensus, ledger, clock=lambda: CLOCK,
+        )
 
 
 def test_a_corrupt_ledger_stops_the_signer_starting(

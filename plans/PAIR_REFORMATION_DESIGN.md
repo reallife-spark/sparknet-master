@@ -1,11 +1,16 @@
 # Re-formation reference design — informed by NVIDIA PAIR's membership model
 
-Status: **design proposal, not a contract change.** This note answers the two
-open questions in `../contracts/consensus-protocol.md` §Re-formation using the
-membership discipline of NVIDIA Personal-AI-Router (PAIR), mapped onto
-sparknet's unanimity. It proposes, it does not adopt: options A/B/C remain
-policy choices and the operator picks one before anything here reaches
-`contracts/`.
+Status: **policy B adopted — partly.** The chain being built in
+`shared/sparknet-consensus.py` and the signer is the Q2 half of this design:
+`previous_root_id` in the signed root fields makes a re-formation a chain, a
+pure verifier can refuse a root that does not descend from the root in force,
+and `verify_chain(roots)` lets an offline peer pull and verify the whole
+lineage over the existing share path. The Q1 half — the *reduced*-membership
+root (majority to reduce) — is **not** adopted: unanimity stays n of n, and the
+unsatisfiable-reduced-root case remains a named gap in
+`contracts/consensus-protocol.md`. Anything Q2-related that this note proposes
+but the implementation does not yet do is a spec item for the pull path's mode
+of exposure, not a contract change.
 
 Reference: PAIR (`services/nvpair-cluster-manager/` `spec.md`, Apache-2.0).
 PAIR's cluster-manager keeps a roster of members and manages admission and
@@ -32,11 +37,15 @@ the ones §Re-formation lacks.
 - **Q1 — the unsatisfiable reduced root.** With unanimity held at n of n even
   after a member is lost, a full cluster losing one member leaves two survivors
   who cannot form a new root, and a pair leaves one. Re-formation is needed
-  precisely when it is impossible.
+  precisely when it is impossible. **Still open** — the Q2 work below does not
+  touch it.
 - **Q2 — how a re-formed root reaches a peer.** The old root is locally
   indistinguishable from the new one (`verify_root` is pure over a single
   root), and broadcasting over a channel the superseded Master controls is how
-  a rolled-back Master suppresses the news of its own replacement.
+  a rolled-back Master suppresses the news of its own replacement. **Closed by
+  policy B**: `previous_root_id` puts the ordering inside the root itself, so a
+  pure verifier holding the new root refuses the old one offline, and the news
+  is pulled, not broadcast.
 
 ## Proposed answer to Q1: admission epochs + removal proof, mapped
 
@@ -82,16 +91,17 @@ already has a pull-shaped channel: the peer↔peer share handoff (runbook Phase
 8) and the registry redistribution are pulled by the peer. So:
 
 - A new root reaches a peer through the peer's **next pull** from *any member
-  of the new root* (a node the new root names, verified by the chain from Q1).
+  of the new root* (a node the new root names, verified by the
+  `previous_root_id` chain — the ordering half of this design, adopted).
 - The superseded Master does not need to be told and cannot suppress the news,
   because it is not the channel: a peer that pulls from a new-root member
   always sees the newer epoch, and a peer that has not pulled simply keeps the
   old root — the same lease-not-broadcast constraint, now satisfied by ordering
   rather than by channel monopoly.
-- `check-not-reverted` (signer) already keys on `root_id`; under the chain that
-  check becomes: refuse any signature whose root does not descend-monotonically
-  from the one in force. That is the strictly-newer admission PAIR uses, made
-  local.
+- `check-not-reverted` (signer) keys on `root_id` and is now monotonic: adopt a
+  root whose `previous_root_id` names the ledger's root in force, refuse
+  anything else without `--accept-requalification`. That is the
+  strictly-newer admission PAIR uses, made local.
 
 ## What this deliberately does not do
 
@@ -101,22 +111,28 @@ already has a pull-shaped channel: the peer↔peer share handoff (runbook Phase
   the members of the *new* root, and a node removed by re-formation cannot
   re-form its way back in on its own (the removed member's cluster key is not in
   the new endorsement set).
-- **Nothing built.** The reduced-root *document* is not defined in
-  `consensus-protocol.md`, the chain is not in `shared/sparknet-consensus.py`,
-  and no live pair exists to exercise a drop. Until the operator picks a policy
-  this stays a reference design.
+- **No reduced-membership root.** The chain (Q2) is built; the reduced-root
+  *document* (Q1) is not. It stays a named gap in `consensus-protocol.md`, and
+  no live pair exists to exercise a drop. The operator still must pick A/B/C
+  for the threshold before the reduced path can be specified.
 
 ## Suggested decision path
 
 1. Operator picks A / B / C (unanimity unchanged / majority-to-reduce / join
    first). The design above is the concrete shape of **B**; pick A to leave
    §Re-formation unchanged, pick C to require a join ceremony.
-2. If B: write the reduced-root document into `identity-schema.json`
-   (`cluster_trust_root.reformation`) and `consensus-protocol.md`, then extend
-   `shared/sparknet-consensus.py` with epoch-chain verification and the signer
-   with monotonic `root_id` ordering. Contract change, one commit, both roles.
+2. **Done (2026-10-09), as the chain half only.** The Q2 orderings are now in
+   the code and the contracts: `previous_root_id` in the signed root fields,
+   `unchained_root` refusal on the trust path, `verify_chain(roots)`, the
+   monotonic `check_not_reverted`, and policy-B text in
+   `consensus-protocol.md` / `identity-schema.json` /
+   `capabilities.json` / `ports.json`. Q1 (majority-to-reduce) remains a policy
+   choice the operator has not made, so the reduced-root document is still not
+   written.
 3. Wire the pull path (Q2) into the existing share handoff rather than a new
-   port.
+   port. **Adopted**: re-formation news pulls over 4220 git-repo / 4201
+   share-intake, with the mode of exposure (how far a peer may fall behind)
+   recorded as the one open spec item.
 
 Provenance: PAIR reviewed 2026-10-08, `services/nvpair-cluster-manager`
 `spec.md` (admission epochs, endorsement chains, removal proofs) and
