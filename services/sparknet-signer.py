@@ -301,7 +301,7 @@ def check_not_reverted(
         return
     if (
         not allow_requalification
-        and consensus.canonical_root(root)["previous_root_id"] == in_force
+        and consensus.canonical_root(root).get("previous_root_id", "") == in_force
     ):
         # Chained re-formation, policy B: this root names the ledger's root in
         # force as its parent, so it is provably newer than anything this signer
