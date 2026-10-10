@@ -214,6 +214,30 @@ def _entry(
 _MODULE_CACHE: dict = {}
 
 
+def _job(mode: str = "decompose", expires_in_minutes: int = 10) -> dict:
+    """A cluster job the way `authz.cluster_job_message` requires one.
+
+    `subtasks` is populated because the partition is inside the signature: a job
+    without a partition is exactly the replayable bare job-id this op must refuse.
+    """
+    return {
+        "job_id": "job-1",
+        "conversation_id": "conv-1",
+        "initiator_node_id": "peer-1",
+        "created_at": CLOCK.isoformat(),
+        "expires_at": (CLOCK + timedelta(minutes=expires_in_minutes)).isoformat(),
+        "mode": mode,
+        "prompt": "summarise the incident timeline",
+        "running_summary": "",
+        "context": {"index": "master-local"},
+        "budget": {"max_tokens": 2048, "deadline_s": 60},
+        "subtasks": [
+            {"node_id": "beta", "role": "gather", "prompt": "collect logs"},
+            {"node_id": "gamma", "role": "gather", "prompt": "collect metrics"},
+        ],
+    }
+
+
 # --- 1. root binding ---------------------------------------------------------
 
 
@@ -620,6 +644,108 @@ def test_a_valid_guard_approval_is_signed(signer):
     )
     assert response["ok"], response.get("error")
     assert response["approval"]["signature_b64"]
+
+
+def test_a_valid_cluster_job_is_signed_over_its_canonical_bytes(
+    signer, authz, operational_key
+):
+    response = signer.handle(
+        {"op": "sign-cluster-job", "root_id": signer.root_id, "job": _job()}
+    )
+    assert response["ok"], response.get("error")
+    signed = response["job"]
+    assert signed["signature_b64"]
+
+    _, public_b64 = operational_key
+    public = authz.public_key_from_b64(public_b64)
+    message = authz.cluster_job_message(signed)
+    assert authz.verify_signature(
+        public, signed["signature_b64"], message
+    ), "the signature must verify against the canonical projection the signer built"
+
+
+def test_the_cluster_job_signature_covers_the_partition(signer, authz, operational_key):
+    """A signature over a job id alone would replay against any partition.
+
+    This is the reason `subtasks` is inside the signed projection rather than a
+    convenience field: changing who does what must invalidate the signature.
+    """
+    response = signer.handle(
+        {"op": "sign-cluster-job", "root_id": signer.root_id, "job": _job()}
+    )
+    assert response["ok"], response.get("error")
+    signed = response["job"]
+
+    _, public_b64 = operational_key
+    public = authz.public_key_from_b64(public_b64)
+    original = authz.cluster_job_message(signed)
+
+    tampered = json.loads(json.dumps(signed))
+    tampered["subtasks"][0]["node_id"] = "delta"
+    assert authz.cluster_job_message(tampered) != original
+    assert not authz.verify_signature(public, signed["signature_b64"], authz.cluster_job_message(tampered))
+
+
+def test_it_refuses_a_cluster_job_without_a_job_object(signer):
+    response = signer.handle({"op": "sign-cluster-job", "root_id": signer.root_id})
+    assert not response["ok"] and "requires a 'job' object" in response["error"]
+
+
+def test_it_refuses_a_cluster_job_missing_required_fields(signer):
+    job = _job()
+    del job["job_id"]
+    response = signer.handle(
+        {"op": "sign-cluster-job", "root_id": signer.root_id, "job": job}
+    )
+    assert not response["ok"] and "job_id" in response["error"]
+
+
+def test_it_refuses_a_cluster_job_with_an_empty_partition(signer):
+    job = _job()
+    job["subtasks"] = []
+    response = signer.handle(
+        {"op": "sign-cluster-job", "root_id": signer.root_id, "job": job}
+    )
+    assert not response["ok"] and "non-empty list" in response["error"]
+
+
+def test_it_refuses_a_cluster_job_with_an_unknown_mode(signer):
+    response = signer.handle(
+        {"op": "sign-cluster-job", "root_id": signer.root_id, "job": _job(mode="freestyle")}
+    )
+    assert not response["ok"] and "freestyle" in response["error"]
+
+
+def test_it_refuses_an_already_expired_cluster_job(signer):
+    response = signer.handle(
+        {
+            "op": "sign-cluster-job",
+            "root_id": signer.root_id,
+            "job": _job(expires_in_minutes=-5),
+        }
+    )
+    assert not response["ok"] and "expired" in response["error"]
+
+
+def test_it_refuses_a_cluster_job_with_an_unparseable_expiry(signer):
+    job = _job()
+    job["expires_at"] = "not a timestamp"
+    response = signer.handle(
+        {"op": "sign-cluster-job", "root_id": signer.root_id, "job": job}
+    )
+    assert not response["ok"] and "expired" in response["error"]
+
+
+def test_it_refuses_a_signature_the_caller_supplied_on_a_cluster_job(signer):
+    job = _job()
+    job["signature_b64"] = base64.b64encode(b"forged").decode()
+    response = signer.handle(
+        {"op": "sign-cluster-job", "root_id": signer.root_id, "job": job}
+    )
+    assert response["ok"], response.get("error")
+    assert response["job"]["signature_b64"] != job["signature_b64"], (
+        "the signer returned the caller's signature instead of its own"
+    )
 
 
 def test_it_refuses_a_group_readable_key(signer_module, root, authz, consensus, tmp_path):

@@ -16,12 +16,13 @@ recorded in `../security/key-management.md`; the topology is asserted in
 
 ## What it will sign
 
-Exactly two payload types, both built from structured input:
+Exactly three payload types, all built from structured input:
 
 | Operation | Signs |
 |---|---|
 | `sign-registry-entry` | a registry entry, via `authz.authorization_message` |
 | `sign-guard-approval` | a `guard-apply` approval for one named peer |
+| `sign-cluster-job` | a cluster job, via `authz.cluster_job_message` |
 
 There is deliberately **no "sign these bytes" operation**. The build plan's
 wording for this step was "accepts only canonical bytes already co-signed by the
@@ -113,7 +114,7 @@ SIGNER_CAPABILITIES = frozenset({"sign"})
 
 #: Operations this process answers. Anything else is refused, including future
 #: additions someone makes in a hurry while the socket is open.
-SIGN_OPERATIONS = ("sign-registry-entry", "sign-guard-approval")
+SIGN_OPERATIONS = ("sign-registry-entry", "sign-guard-approval", "sign-cluster-job")
 READ_OPERATIONS = ("capabilities", "public-key", "root-id", "ping")
 OPERATIONS = SIGN_OPERATIONS + READ_OPERATIONS
 
@@ -485,6 +486,8 @@ class Signer:
 
         if op == "sign-registry-entry":
             return self._sign_registry_entry(op, request)
+        if op == "sign-cluster-job":
+            return self._sign_cluster_job(op, request)
         return self._sign_guard_approval(op, request)
 
     def _sign_registry_entry(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -567,6 +570,33 @@ class Signer:
         return {
             "ok": True,
             "approval": {**approval, "signature_b64": signature_b64},
+            "ledger_block": block["hash"],
+        }
+
+    def _sign_cluster_job(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
+        job = request.get("job")
+        if not isinstance(job, dict):
+            return self._refuse("sign-cluster-job requires a 'job' object")
+
+        # The caller may echo a signature back; the signer always rebuilds over
+        # the projected fields, so a smuggled one is discarded rather than recorded.
+        unsigned = {k: v for k, v in job.items() if k != "signature_b64"}
+        try:
+            message = self.authz.cluster_job_message(unsigned)
+        except Exception as exc:
+            return self._refuse(f"cluster job is not canonicalisable: {exc}")
+
+        now = (self.clock or (lambda: datetime.now(timezone.utc)))()
+        if self.authz.is_expired(unsigned["expires_at"], now):
+            return self._refuse(
+                f"refusing to sign a cluster job that expired at {unsigned['expires_at']}"
+            )
+
+        signature_b64 = self.authz.sign_bytes(self.key, message)
+        block = self._record(op, str(unsigned["job_id"]), signature_b64)
+        return {
+            "ok": True,
+            "job": {**unsigned, "signature_b64": signature_b64},
             "ledger_block": block["hash"],
         }
 
@@ -814,6 +844,9 @@ def describe() -> dict[str, Any]:
             "registry entries granting unknown capabilities",
             "guard approvals missing peer, version, path, action or expiry",
             "guard approvals whose expiry has already passed",
+            "cluster jobs missing a job id, conversation, initiator, mode, prompt or subtasks",
+            "cluster jobs naming an unknown mode",
+            "cluster jobs whose expiry has already passed or cannot be parsed",
         ],
         "not_reachable_from": [
             "the dispatch bridge",
