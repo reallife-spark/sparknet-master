@@ -748,12 +748,16 @@ containment and scheduling.
         dispatches to a peer's `/admin/*` route; `list_events` reads the peer's
         own auth-event spool for the feed, and `feed --ping` pages KDE devices.
         Wired as `make console`; `master-node/tests/test_admin_console.py`
-        covers compose/sign/dispatch/resolve/feed/notify. Still open are the live
-        legs — the console binding `10.100.0.1:8080`, a real approval over the
-        overlay, a KDE push to a paired device, and no human admin on a peer
-        (`DoD: confirm: user`). Cursor stays at Step 2: this depends on the
-        fabric's `admin-supervise` adoption (Step 29 Phase 2) and the peer agent
-        (peer Step 12), both landed as code; the live deploy is Phase 5.
+        covers compose/sign/dispatch/resolve/feed/notify. **Live legs verified
+        2026-10-12** (fabric Step 29 Phase 5, cluster2 `.131`/`.133`): a real
+        pending signup, the signed `approve`/`role` legs over the overlay (200,
+        `pending→user`, `user`↔`admin`), the live `events`/`feed` read of the
+        peer's spool, a KDE push the operator confirmed on both devices, no human
+        admin on a peer (service account only) — with one console defect fixed
+        (the CLI prepended the target node as the first entity field, breaking
+        every `user_id` action). **Still open — DoD (3)**: the console/admin
+        surface is not yet bound on `10.100.0.1:8080` (Step 18's open leg).
+        Cursor stays at Step 2.
 
 ## Sequencing note
 
