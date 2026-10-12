@@ -23,7 +23,7 @@ PY := $(if $(wildcard $(VENV_PY)),$(VENV_PY),python3)
 
 .PHONY: help env-init validate status plan test test-all lint spec-check \
         env-show parity ledger keygen keys-check units units-check \
-        signer signer-unit \
+        signer signer-unit console \
         provenance-verify user-init provenance-append ingest precommit shims-check \
         bundle wiki-preflight wiki-status wiki-lint wiki-query clean
 
@@ -115,6 +115,14 @@ signer-unit: ## Stage the signer unit ONLY (does not enable it; election does th
 	@echo "  ✓ staged $(SIGNER_UNIT) into $(UNIT_DIR) — not enabled."
 	@echo "    It will refuse to start until SPARKNET_NODE_ID and"
 	@echo "    \$$SPARKNET_STATE_DIR/trust-root.json name this node as Master."
+
+# The console is the operator's seat: it composes an admin request, asks the
+# isolated signer for a signature, and posts it to a peer's /admin/ route. It is
+# deliberately wired as a target here so it is not an inert file: it has no unit
+# of its own (it runs on demand, in front of a human), and the spec test requires
+# every service to be reachable from a unit or a make target.
+console: ## Master admin console (ARGS='users <node>', 'feed --ping', ...)
+	@$(PY) "$(VAULT_ROOT)/services/sparknet-admin-console.py" $(ARGS)
 
 keygen: ## Generate this node\'s cluster/operational/identity keys into the state dir
 	@"$(VAULT_ROOT)/scripts/sparknet-master-keygen.sh"

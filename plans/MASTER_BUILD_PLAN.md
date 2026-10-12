@@ -742,9 +742,18 @@ containment and scheduling.
         (4) KDE Connect pages the operator on signup/login; (5) no peer exposes
         a human admin (service account only). **DoD: confirm: user** — the live
         legs are operator-verified on `.131`/`.133`.
-      - **Status**: not started, opened 2026-10-12. Cursor stays at Step 2:
-        this depends on the fabric's `admin-supervise` adoption (Step 29
-        Phase 2) and the peer agent (peer Step 12), neither built yet.
+      - **Status**: console landed as code 2026-10-12 (fabric Step 29 Phases
+        3–4). `master-node/services/sparknet-admin-console.py` composes a signed
+        `admin-request`, signs it over the isolated signer's socket, and
+        dispatches to a peer's `/admin/*` route; `list_events` reads the peer's
+        own auth-event spool for the feed, and `feed --ping` pages KDE devices.
+        Wired as `make console`; `master-node/tests/test_admin_console.py`
+        covers compose/sign/dispatch/resolve/feed/notify. Still open are the live
+        legs — the console binding `10.100.0.1:8080`, a real approval over the
+        overlay, a KDE push to a paired device, and no human admin on a peer
+        (`DoD: confirm: user`). Cursor stays at Step 2: this depends on the
+        fabric's `admin-supervise` adoption (Step 29 Phase 2) and the peer agent
+        (peer Step 12), both landed as code; the live deploy is Phase 5.
 
 ## Sequencing note
 
