@@ -16,13 +16,14 @@ recorded in `../security/key-management.md`; the topology is asserted in
 
 ## What it will sign
 
-Exactly three payload types, all built from structured input:
+Exactly four payload types, all built from structured input:
 
 | Operation | Signs |
 |---|---|
 | `sign-registry-entry` | a registry entry, via `authz.authorization_message` |
 | `sign-guard-approval` | a `guard-apply` approval for one named peer |
 | `sign-cluster-job` | a cluster job, via `authz.cluster_job_message` |
+| `sign-admin-request` | an `admin-supervise` admin request, via `authz.admin_request_message` |
 
 There is deliberately **no "sign these bytes" operation**. The build plan's
 wording for this step was "accepts only canonical bytes already co-signed by the
@@ -114,7 +115,7 @@ SIGNER_CAPABILITIES = frozenset({"sign"})
 
 #: Operations this process answers. Anything else is refused, including future
 #: additions someone makes in a hurry while the socket is open.
-SIGN_OPERATIONS = ("sign-registry-entry", "sign-guard-approval", "sign-cluster-job")
+SIGN_OPERATIONS = ("sign-registry-entry", "sign-guard-approval", "sign-cluster-job", "sign-admin-request")
 READ_OPERATIONS = ("capabilities", "public-key", "root-id", "ping")
 OPERATIONS = SIGN_OPERATIONS + READ_OPERATIONS
 
@@ -488,6 +489,8 @@ class Signer:
             return self._sign_registry_entry(op, request)
         if op == "sign-cluster-job":
             return self._sign_cluster_job(op, request)
+        if op == "sign-admin-request":
+            return self._sign_admin_request(op, request)
         return self._sign_guard_approval(op, request)
 
     def _sign_registry_entry(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -597,6 +600,34 @@ class Signer:
         return {
             "ok": True,
             "job": {**unsigned, "signature_b64": signature_b64},
+            "ledger_block": block["hash"],
+        }
+
+    def _sign_admin_request(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
+        """Admin requests (admin-supervise) are signed the way cluster jobs are:
+        rebuilt over the canonical projection so a smuggled signature is
+        discarded, expiry is checked, and the ledger records the request_id."""
+        admin = request.get("request")
+        if not isinstance(admin, dict):
+            return self._refuse("sign-admin-request requires an 'admin-request' object")
+
+        unsigned = {k: v for k, v in admin.items() if k != "signature_b64"}
+        try:
+            message = self.authz.admin_request_message(unsigned)
+        except Exception as exc:
+            return self._refuse(f"admin request is not canonicalisable: {exc}")
+
+        now = (self.clock or (lambda: datetime.now(timezone.utc)))()
+        if self.authz.is_expired(unsigned["expires_at"], now):
+            return self._refuse(
+                f"refusing to sign an admin request that expired at {unsigned['expires_at']}"
+            )
+
+        signature_b64 = self.authz.sign_bytes(self.key, message)
+        block = self._record(op, str(unsigned["request_id"]), signature_b64)
+        return {
+            "ok": True,
+            "admin_request": {**unsigned, "signature_b64": signature_b64},
             "ledger_block": block["hash"],
         }
 

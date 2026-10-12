@@ -748,6 +748,117 @@ def test_it_refuses_a_signature_the_caller_supplied_on_a_cluster_job(signer):
     )
 
 
+# --- admin requests (admin-supervise, fabric Step 29 phase 2) -----------------
+
+
+def _admin_request(expires_in_minutes: int = 10, action: str = "set_user_role") -> dict:
+    """An admin request the way `authz.admin_request_message` requires one.
+
+    The target is a peer (this fabric's peer-1), so the role and the fields
+    match what a Master actually signs for a peer's Open WebUI.
+    """
+    return {
+        "request_id": "admin-req-0001",
+        "conversation_id": None,
+        "master_node_id": MASTER,
+        "target_node_id": "peer-1",
+        "target_fingerprint": hashlib.sha256(b"fp-peer-1").hexdigest(),
+        "issued_at": CLOCK.isoformat(),
+        "expires_at": (CLOCK + timedelta(minutes=expires_in_minutes)).isoformat(),
+        "nonce": "nonce-0001",
+        "action": action,
+        "user_id": "user-07",
+        "user_email": "ana@example.test",
+        "role": "user",
+        "kb_id": None,
+        "chat_id": None,
+    }
+
+
+def test_a_valid_admin_request_is_signed_over_its_canonical_bytes(
+    signer, authz, operational_key
+):
+    response = signer.handle(
+        {"op": "sign-admin-request", "root_id": signer.root_id, "request": _admin_request()}
+    )
+    assert response["ok"], response.get("error")
+    signed = response["admin_request"]
+    assert signed["signature_b64"]
+
+    _, public_b64 = operational_key
+    public = authz.public_key_from_b64(public_b64)
+    assert authz.verify_signature(
+        public, signed["signature_b64"], authz.admin_request_message(signed)
+    ), "the signature must verify against the canonical projection the signer built"
+
+
+def test_the_admin_request_signature_covers_the_action(signer, authz, operational_key):
+    """Changing the action must invalidate the signature — it is the scope."""
+    response = signer.handle(
+        {"op": "sign-admin-request", "root_id": signer.root_id, "request": _admin_request()}
+    )
+    assert response["ok"], response.get("error")
+    signed = response["admin_request"]
+
+    _, public_b64 = operational_key
+    public = authz.public_key_from_b64(public_b64)
+
+    tampered = json.loads(json.dumps(signed))
+    tampered["action"] = "approve_user"
+    assert authz.admin_request_message(tampered) != authz.admin_request_message(signed)
+    assert not authz.verify_signature(
+        public, signed["signature_b64"], authz.admin_request_message(tampered)
+    )
+
+
+def test_it_refuses_an_admin_request_without_a_request_object(signer):
+    response = signer.handle({"op": "sign-admin-request", "root_id": signer.root_id})
+    assert not response["ok"] and "requires an 'admin-request' object" in response["error"]
+
+
+def test_it_refuses_an_admin_request_missing_required_fields(signer):
+    request = _admin_request()
+    del request["target_fingerprint"]
+    response = signer.handle(
+        {"op": "sign-admin-request", "root_id": signer.root_id, "request": request}
+    )
+    assert not response["ok"] and "target_fingerprint" in response["error"]
+
+
+def test_it_refuses_an_admin_request_with_an_unknown_action(signer):
+    response = signer.handle(
+        {
+            "op": "sign-admin-request",
+            "root_id": signer.root_id,
+            "request": _admin_request(action="root-everything"),
+        }
+    )
+    assert not response["ok"] and "unknown admin action" in response["error"]
+
+
+def test_it_refuses_an_already_expired_admin_request(signer):
+    response = signer.handle(
+        {
+            "op": "sign-admin-request",
+            "root_id": signer.root_id,
+            "request": _admin_request(expires_in_minutes=-5),
+        }
+    )
+    assert not response["ok"] and "expired" in response["error"]
+
+
+def test_it_refuses_a_signature_the_caller_supplied_on_an_admin_request(signer):
+    request = _admin_request()
+    request["signature_b64"] = base64.b64encode(b"forged").decode()
+    response = signer.handle(
+        {"op": "sign-admin-request", "root_id": signer.root_id, "request": request}
+    )
+    assert response["ok"], response.get("error")
+    assert response["admin_request"]["signature_b64"] != request["signature_b64"], (
+        "the signer returned the caller's signature instead of its own"
+    )
+
+
 def test_it_refuses_a_group_readable_key(signer_module, root, authz, consensus, tmp_path):
     private, _ = _keypair(f"operational-{MASTER}")
     key_path = tmp_path / "loose.ed25519"

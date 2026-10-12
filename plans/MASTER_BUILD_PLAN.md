@@ -723,6 +723,29 @@ containment and scheduling.
         already running, not a dependency of anything unbuilt, so it must not
         pull the plan cursor forward.
 
+## Step 21 — Master admin console: supervise every node's WebUI
+
+- [ ] **Step 21** — The Master's admin surface becomes the one place an
+      administrator signs in and supervises the whole fabric's Open WebUI users,
+      privileges and activity: a console that composes signed `admin-request`s
+      (the new `admin-supervise` capability, fabric Step 29 Phase 2), shows a
+      live feed of signups and successful logins from every node, and can list
+      users, change roles, approve pending signups, and inspect a user's
+      Knowledge, models and chats — each action performed by the *peer's* own
+      agent against the peer's own WebUI, never a direct write.
+      Design: `../ADMIN_FEDERATION_DESIGN.md` (fabric root).
+      - **DoD**: (1) the console reads each node's event spool through the
+        bridge `/admin/*` route, carrying a signature the peer verifies under
+        `admin-supervise` before any WebUI call; (2) approval/role change/KB read
+        are expressible and audited; (3) the admin surface binds
+        `10.100.0.1:8080` per `../contracts/ports.json` (Step 18's open leg);
+        (4) KDE Connect pages the operator on signup/login; (5) no peer exposes
+        a human admin (service account only). **DoD: confirm: user** — the live
+        legs are operator-verified on `.131`/`.133`.
+      - **Status**: not started, opened 2026-10-12. Cursor stays at Step 2:
+        this depends on the fabric's `admin-supervise` adoption (Step 29
+        Phase 2) and the peer agent (peer Step 12), neither built yet.
+
 ## Sequencing note
 
 **Steps 13 and 14 gate everything below them.** Steps 1–4 assume a Master that
