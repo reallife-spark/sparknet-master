@@ -581,7 +581,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             action = VERB_ACTIONS[args.verb]
-            entity = build_entity(action, ([args.target] if args.target else []) + args.entity)
+            # The target names the node to talk to; it is NOT an entity field.
+            # Prepending it here sent `user_id: "<node>"` and the peer refused
+            # every user_id action as an unknown user (found live 2026-10-12).
+            entity = build_entity(action, args.entity)
             result = console.send(action, spec=args.target, entity=entity)
     except ConsoleError as exc:
         print(f"[console] {exc}", file=sys.stderr)

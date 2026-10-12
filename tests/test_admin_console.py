@@ -417,3 +417,33 @@ def test_cli_requires_a_master_node_id(capsys: pytest.CaptureFixture, monkeypatc
     rc = console.main(["users", "peer-1"])
     assert rc == 1
     assert "--master-node-id" in capsys.readouterr().err
+
+
+def test_main_maps_positional_entity_without_the_target(monkeypatch: pytest.MonkeyPatch):
+    """`approve <node> <user_id>` must send the user id, never the node spec.
+
+    The target names the node; it is not an entity field. Sending it as
+    `user_id` made the peer refuse every user_id action as an unknown user
+    (found live 2026-10-12).
+    """
+    seen: dict[str, Any] = {}
+
+    def fake_send(self, action, *, spec, entity=None):
+        seen.update(action=action, spec=spec, entity=entity)
+        return {"ok": True}
+
+    monkeypatch.setattr(console.Console, "send", fake_send)
+
+    rc = console.main(["approve", "peer-1", "u1", "--master-node-id", "m1", "--registry", "reg.json"])
+    assert rc == 0
+    assert seen == {"action": "approve_user", "spec": "peer-1", "entity": {"user_id": "u1"}}
+
+    rc = console.main(
+        ["role", "peer-2", "u9", "admin", "--master-node-id", "m1", "--registry", "reg.json"]
+    )
+    assert rc == 0
+    assert seen == {
+        "action": "set_user_role",
+        "spec": "peer-2",
+        "entity": {"user_id": "u9", "role": "admin"},
+    }
