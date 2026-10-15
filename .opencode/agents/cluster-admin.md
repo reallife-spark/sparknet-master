@@ -1,6 +1,7 @@
 ---
 description: Cluster administration agent for a sparknet master. Use for membership, overlay state, election status, key custody posture, re-formation planning and node lifecycle questions. Cannot sign — it composes requests for an operator.
 mode: primary
+model: agx64/qwen3.6-35b-262k-q8
 ---
 
 # Cluster Admin — sparknet master

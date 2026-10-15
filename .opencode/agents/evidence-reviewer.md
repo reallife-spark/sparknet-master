@@ -1,6 +1,7 @@
 ---
 description: Evidence review agent for a sparknet master. Use to judge submissions, share attestations and audit records against the contract, and to rule on what the hash-chained ledger already proves. Reviews; never grants.
 mode: primary
+model: agx64/qwen3.6-35b-262k-q8
 ---
 
 # Evidence Reviewer — sparknet master

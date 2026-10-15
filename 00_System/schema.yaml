@@ -1,4 +1,4 @@
-schema: sparknet-note/1
+schema: sparknet-note/2
 schema_version: 1
 description: "Local note conventions for this vault: the two frontmatter zones, the commands that sign and verify, and where the normative definitions live. An index, not a copy."
 source:
@@ -7,7 +7,7 @@ source:
   implementation: shared/sparknet-provenance.py
 zones:
   meta: "every frontmatter key except `tracking` — the compiler's field zone (title, tags, updated). Canonicalised as JSON when a note is signed."
-  tracking: "the provenance block: schema, owner_id, owner_node, owner_ref, validity, conversation, shares, agent, model, approvals, signature. Signed as JSON with `signature` removed."
+  tracking: "the provenance block: schema, owner_id, owner_node, owner_ref, validity, conversation, shares, agent, model, approvals, signature. Signed as JSON with `signature` removed; `signature.co_signatures[]` is a sibling of the primary `sig`, so a second user's attestation is appended without rewriting the author."
   body: "the bytes after the closing `---`, verbatim. Hashed as-is, so a compiler rewrite of the body is stale:content rather than a valid edit."
 commands:
   verify: make provenance-verify
@@ -19,4 +19,4 @@ exit_codes:
   ok: "0 — valid, stale:metadata or pending"
   hard_failure: "1 — invalid"
   resign_required: "2 — stale:content"
-note: "The signed message for a note is four ASCII lines: the domain tag, then the body hash, the meta hash and the tracking hash. Read the contract for the exact bytes; this file deliberately does not duplicate them."
+note: "The signed message for a note is five ASCII lines: the domain tag, then the body hash, the meta hash, the tracking hash and the conversation root. Read the contract for the exact bytes; this file deliberately does not duplicate them."

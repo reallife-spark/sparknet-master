@@ -325,13 +325,8 @@ def check_not_reverted(
 # --- ledger ------------------------------------------------------------------
 
 
-def _block_hash(block: dict[str, Any]) -> str:
-    payload = {k: v for k, v in block.items() if k != "hash"}
-    import hashlib
-
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+def _block_hash(block: dict[str, Any], authz: Any) -> str:
+    return authz.ledger_block_hash(block)
 
 
 def record_signature(
@@ -341,17 +336,25 @@ def record_signature(
     subject: str,
     signature_b64: str,
     root_id: str,
+    *,
+    authz: Any,
+    private_key: Any,
+    node_pubkey_b64: str,
     clock=None,
 ) -> dict[str, Any]:
-    """Append one `signature_issued` block.
+    """Append one `signature_issued` block whose *header* the node key signs.
 
-    The ledger is written with `O_APPEND`-style exclusive create and a 0600 mode,
-    and the write is a single `write()` of one line, because the alternative — read
-    the ledger, append in memory, rewrite the file — loses entries if two
-    requests land together. Requests are serialised by the signer lock (one lock
-    around `Signer.handle` in the transport), and the
-    signature over the block covers the previous hash, so a lost block is visible
-    as a broken chain rather than invisible.
+    `signature_b64` is the operation's own signature (over a registry entry, a
+    job, …) and is recorded inside `data`; the block-level `signature` is a
+    **second** signature by the same key over the whole block header, so the
+    block's position, timestamp and payload are bound to the key rather than
+    restated. Without it, a block could be deleted or reordered and the chain
+    would still verify.
+
+    The ledger is written atomically with a 0600 mode. Requests are serialised by
+    the signer lock (one lock around `Signer.handle` in the transport), and the
+    header signature covers the previous hash, so a lost block is visible as a
+    broken chain rather than invisible.
 
     `append` lives here rather than in `sparknet-ledger.py` on purpose: that
     module can only verify, because appending requires this key. One process
@@ -364,16 +367,17 @@ def record_signature(
         except json.JSONDecodeError as exc:
             raise SignerError(f"ledger is corrupt, refusing to sign: {exc}") from exc
     else:
-        ledger = {"version": "1.0", "genesis_hash": "", "blocks": []}
+        ledger = {"version": "2.0", "genesis_hash": "", "blocks": []}
 
     blocks = ledger["blocks"]
-    previous = blocks[-1]["hash"] if blocks else ""
+    previous = blocks[-1]["hash"] if blocks else str(ledger.get("genesis_hash", ""))
     index = len(blocks)
     now = (clock or (lambda: datetime.now(timezone.utc)))()
     block: dict[str, Any] = {
         "block_id": f"{index:08d}",
         "prev_hash": previous,
         "timestamp": now.isoformat().replace("+00:00", "Z"),
+        "node_pubkey_b64": node_pubkey_b64,
         "data": {
             "event": "signature_issued",
             "node_id": node_id,
@@ -382,9 +386,9 @@ def record_signature(
             "signature_b64": signature_b64,
             "root_id": root_id,
         },
-        "signature": signature_b64,
     }
-    block["hash"] = _block_hash(block)
+    block["signature"] = authz.sign_bytes(private_key, authz.ledger_block_signable(block))
+    block["hash"] = _block_hash(block, authz)
     blocks.append(block)
     _atomic_write(ledger_path, json.dumps(ledger, indent=2) + "\n", mode=0o600)
     return block
@@ -640,6 +644,9 @@ class Signer:
             subject,
             signature_b64,
             self.root_id,
+            authz=self.authz,
+            private_key=self.key,
+            node_pubkey_b64=self.public_key_b64,
             clock=self.clock,
         )
 
