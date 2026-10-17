@@ -120,10 +120,16 @@ def test_the_key_directory_is_0700() -> None:
 def test_no_private_half_is_tracked_by_git() -> None:
     tracked = subprocess.run(
         [
-            "git", "-C", str(FABRIC_ROOT), "ls-files",
-            "master-node/.state/**", "master-node/**.ed25519",
+            "git",
+            "-C",
+            str(FABRIC_ROOT),
+            "ls-files",
+            "master-node/.state/**",
+            "master-node/**.ed25519",
         ],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.split()
     assert not tracked, (
         f"key material is tracked: {tracked}. It is in history — deleting the file "
@@ -145,9 +151,9 @@ def test_the_legacy_state_path_stays_ignored_as_a_backstop() -> None:
     keys. Found by `scripts/sparknet-bundle.sh --verify`.
     """
     probe = subprocess.run(
-        ["git", "-C", str(FABRIC_ROOT), "check-ignore", "-q",
-         "master-node/.state/keys/operational.ed25519"],
-        capture_output=True, check=False,
+        ["git", "-C", str(FABRIC_ROOT), "check-ignore", "-q", "master-node/.state/keys/operational.ed25519"],
+        capture_output=True,
+        check=False,
     )
     if probe.returncode == 128:
         pytest.skip("not a git work tree (extracted node bundle)")
@@ -171,9 +177,7 @@ def test_each_public_half_is_a_real_public_key_for_its_private_half(
         private_b64 = (_key_dir() / f"{name}.ed25519").read_text().strip()
         public_b64 = (_key_dir() / f"{name}.pub.b64").read_text().strip()
         key = authz.private_key_from_b64(private_b64)
-        derived = base64.b64encode(
-            key.public_key().public_bytes_raw()
-        ).decode()
+        derived = base64.b64encode(key.public_key().public_bytes_raw()).decode()
         assert derived == public_b64, (
             f"{name}.pub.b64 does not match {name}.ed25519. Either a second "
             f"keygen call overwrote one half, or the file was edited. A node with "
@@ -189,9 +193,7 @@ def test_no_two_keys_are_the_same_key(authz) -> None:
     would hold a key that can sign a registry entry, and `key-management.md`'s
     central argument would be false in the one place it could be checked.
     """
-    publics = {
-        name: (_key_dir() / f"{name}.pub.b64").read_text().strip() for name in KEY_NAMES
-    }
+    publics = {name: (_key_dir() / f"{name}.pub.b64").read_text().strip() for name in KEY_NAMES}
     assert len(set(publics.values())) == len(KEY_NAMES), (
         f"keys are not distinct: {publics}. The cluster key signs the root only; "
         f"if it equals the operational key, every member can sign registry entries."
@@ -202,9 +204,7 @@ def test_no_two_keys_are_the_same_key(authz) -> None:
 
 
 def test_master_identity_exists_and_describes_this_role() -> None:
-    assert MANIFEST.is_file(), (
-        f"{MANIFEST} is missing. Step 1 asks for a description of the Master role."
-    )
+    assert MANIFEST.is_file(), f"{MANIFEST} is missing. Step 1 asks for a description of the Master role."
 
 
 def test_the_master_manifest_declares_peer_and_explains_why(manifest: dict) -> None:
@@ -236,8 +236,7 @@ def test_the_role_scope_is_named_separately_from_the_identity_role(
         "is legitimate scope, and losing it makes the file read like a peer."
     )
     assert "role" not in set(manifest) - {"role", "role_note", "role_implemented_by"}, (
-        "a second field named `role` would be a second role declaration, and two "
-        "of them can disagree"
+        "a second field named `role` would be a second role declaration, and two of them can disagree"
     )
 
 
@@ -245,8 +244,7 @@ def test_both_identity_manifests_agree_on_the_anchor(manifest: dict) -> None:
     """Two identity files, one address. Drift here is a routing failure."""
     node = json.loads(NODE_IDENTITY.read_text())
     assert manifest["overlay_ipv4"].split("/")[0] == "10.100.0.1", (
-        f"the Master role is anchored at 10.100.0.1 per contracts/overlay.json; "
-        f"this says {manifest['overlay_ipv4']}"
+        f"the Master role is anchored at 10.100.0.1 per contracts/overlay.json; this says {manifest['overlay_ipv4']}"
     )
     assert node["overlay_ipv4"] != manifest["overlay_ipv4"], (
         "node-identity.json is the *template* and should carry an unset address; "
@@ -287,8 +285,7 @@ def test_the_manifest_states_the_election_path_actually_implemented(manifest: di
     chain = election["authority_path"]
     for token in ("trust-root.json", "sparknet-signer.py"):
         assert token in chain, (
-            f"authority_path must name {token} — it is the chain that actually "
-            f"decides what this node may sign"
+            f"authority_path must name {token} — it is the chain that actually decides what this node may sign"
         )
     assert (VAULT_ROOT / "services" / "sparknet-signer.py").is_file(), (
         "authority_path names services/sparknet-signer.py and it does not exist"
@@ -299,9 +296,7 @@ def test_the_manifest_states_the_election_path_actually_implemented(manifest: di
 
 
 def test_the_contract_no_longer_says_the_placeholder_key_is_trackable() -> None:
-    contract = json.loads(
-        (FABRIC_ROOT / "contracts" / "identity-schema.json").read_text()
-    )
+    contract = json.loads((FABRIC_ROOT / "contracts" / "identity-schema.json").read_text())
     spec = contract["master_public_key"]
     assert spec["tracked"] is False, (
         "a tracked master public key was authoritative under the single-key model. "
@@ -318,9 +313,7 @@ def test_the_contract_no_longer_says_the_placeholder_key_is_trackable() -> None:
 
 
 def test_the_contract_points_publication_at_the_root_not_a_file() -> None:
-    contract = json.loads(
-        (FABRIC_ROOT / "contracts" / "identity-schema.json").read_text()
-    )
+    contract = json.loads((FABRIC_ROOT / "contracts" / "identity-schema.json").read_text())
     published = contract["master_public_key"].get("published_to", "")
     assert "trust root" in published.lower(), (
         "a peer's trust in the signing key comes from the root it was handed. If "
@@ -397,16 +390,24 @@ def test_the_vault_references_the_state_dir_only_by_variable() -> None:
     Narrowing the scan to files that could actually open a file is what keeps it
     from flagging the documentation of the bug it prevents.
     """
-    roots = [VAULT_ROOT / "services", VAULT_ROOT / "scripts", VAULT_ROOT / "configs",
-             VAULT_ROOT / "manifests", VAULT_ROOT / "systemd"]
+    roots = [
+        VAULT_ROOT / "services",
+        VAULT_ROOT / "scripts",
+        VAULT_ROOT / "configs",
+        VAULT_ROOT / "manifests",
+        VAULT_ROOT / "systemd",
+    ]
     hardcoded = []
     for root in roots:
         if not root.is_dir():
             continue
         for p in root.rglob("*"):
-            if p.is_file() and p.suffix in {".py", ".sh", ".yml", ".yaml", ".json"}:
-                if re.search(r"(?<!\$)\b\w*\.state/keys", p.read_text(errors="ignore")):
-                    hardcoded.append(p)
+            if (
+                p.is_file()
+                and p.suffix in {".py", ".sh", ".yml", ".yaml", ".json"}
+                and re.search(r"(?<!\$)\b\w*\.state/keys", p.read_text(errors="ignore"))
+            ):
+                hardcoded.append(p)
     makefiles = [VAULT_ROOT / "Makefile"]
     hardcoded += [p for p in makefiles if p.is_file() and ".state/keys" in p.read_text()]
     assert not hardcoded, (
@@ -435,12 +436,8 @@ def test_a_signed_entry_verifies_against_this_nodes_own_key(authz) -> None:
         "overlay_ipv4": "10.100.0.9/32",
         "requested_capabilities": ["telemetry"],
     }
-    private = authz.private_key_from_b64(
-        (_key_dir() / "operational.ed25519").read_text().strip()
-    )
-    entry = authz.sign_authorization(
-        identity, private, ["telemetry"], ttl_days=1, now=now
-    )
+    private = authz.private_key_from_b64((_key_dir() / "operational.ed25519").read_text().strip())
+    entry = authz.sign_authorization(identity, private, ["telemetry"], ttl_days=1, now=now)
     registry = {"authorizations": [entry]}
     public = authz.public_key_from_b64(entry["identity"] and (_key_dir() / "operational.pub.b64").read_text().strip())
 
@@ -488,7 +485,7 @@ def test_the_plan_records_the_step_1_step_13_contradiction() -> None:
     manifest back and breaks the elected model.
     """
     text = PLAN.read_text()
-    step1 = text[text.index("## Step 1"):text.index("## Step 2")]
+    step1 = text[text.index("## Step 1") : text.index("## Step 2")]
     assert "Step 13" in step1, (
         "Step 1's `role: master` DoD contradicts Step 13's elected model and the "
         "resolution must be written into Step 1 itself."
@@ -507,9 +504,9 @@ def test_state_dir_is_not_shipped_in_a_bundle() -> None:
         if pattern in script:
             break
     else:
-        assert any(
-            ".state" in line and "exclude" in line for line in script.splitlines()
-        ), "found no --exclude for .state in the bundle script"
+        assert any(".state" in line and "exclude" in line for line in script.splitlines()), (
+            "found no --exclude for .state in the bundle script"
+        )
 
 
 def test_keys_check_and_the_suite_agree_about_what_the_state_dir_is() -> None:
@@ -522,11 +519,8 @@ def test_keys_check_and_the_suite_agree_about_what_the_state_dir_is() -> None:
     """
     makefile = (VAULT_ROOT / "Makefile").read_text()
     assert "expected 600" in makefile and "expected 700" in makefile, (
-        "the Makefile target no longer checks modes; the suite and the make target "
-        "must enforce the same rule"
+        "the Makefile target no longer checks modes; the suite and the make target must enforce the same rule"
     )
     spec = (VAULT_ROOT / "tests" / "test_master_spec.py").read_text()
-    assert "0o600" in spec and "0o700" in spec, (
-        "the python guard no longer checks modes; see above"
-    )
+    assert "0o600" in spec and "0o700" in spec, "the python guard no longer checks modes; see above"
     assert os.sep == "/", "this file's mode expectations are written for posix stat"

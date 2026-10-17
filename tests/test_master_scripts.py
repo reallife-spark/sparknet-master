@@ -73,10 +73,7 @@ def test_scripts_contain_no_cryptography_of_their_own():
         # Strip comment lines first. The header of these scripts *discusses*
         # cryptography in prose ("this script contains no cryptography"), and a
         # substring check over the whole file would flag its own explanation.
-        code = "\n".join(
-            line for line in raw.splitlines()
-            if not line.lstrip().startswith("#")
-        )
+        code = "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("#"))
         for forbidden in (
             "Ed25519PrivateKey",
             "from_private_bytes",
@@ -86,19 +83,14 @@ def test_scripts_contain_no_cryptography_of_their_own():
             "hashlib.sha256(",
         ):
             assert forbidden not in code, (
-                f"{name} contains {forbidden!r} outside a comment; key work belongs "
-                f"in shared/sparknet-authz.py"
+                f"{name} contains {forbidden!r} outside a comment; key work belongs in shared/sparknet-authz.py"
             )
 
 
 def test_keygen_delegates_to_the_shared_implementation():
     text = (SCRIPTS / "sparknet-master-keygen.sh").read_text()
-    assert "sparknet-authz.py" in text, (
-        "the keygen must call the shared implementation by path"
-    )
-    assert "generate-keypair" in text, (
-        "and must use its keypair subcommand, not a hand-rolled equivalent"
-    )
+    assert "sparknet-authz.py" in text, "the keygen must call the shared implementation by path"
+    assert "generate-keypair" in text, "and must use its keypair subcommand, not a hand-rolled equivalent"
 
 
 def test_keygen_header_says_why_it_cannot_delegate_to_the_peer():
@@ -114,7 +106,9 @@ def test_keygen_header_says_why_it_cannot_delegate_to_the_peer():
 def test_env_script_resolves_this_role_and_the_peer():
     result = subprocess.run(
         [str(SCRIPTS / "sparknet-master-env.sh")],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     out = result.stdout
     assert "master-node" in out
@@ -130,7 +124,9 @@ def test_keygen_writes_three_keys_that_load_and_sign(tmp_path, authz):
     """
     result = subprocess.run(
         [str(SCRIPTS / "sparknet-master-keygen.sh")],
-        capture_output=True, text=True, env={**os.environ, "SPARKNET_STATE_DIR": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        env={**os.environ, "SPARKNET_STATE_DIR": str(tmp_path)},
     )
     assert result.returncode == 0, result.stderr
 
@@ -142,9 +138,7 @@ def test_keygen_writes_three_keys_that_load_and_sign(tmp_path, authz):
         assert pub.is_file(), f"{role} public key not written"
 
         # Mode is the control that stops a key being read by another local account.
-        assert priv.stat().st_mode & 0o077 == 0, (
-            f"{role}.ed25519 must be 0600; a readable private key is a leaked one"
-        )
+        assert priv.stat().st_mode & 0o077 == 0, f"{role}.ed25519 must be 0600; a readable private key is a leaked one"
 
         key = authz.private_key_from_b64(priv.read_text().strip())
         assert authz.public_key_b64(key.public_key()) == pub.read_text().strip(), (
@@ -176,17 +170,16 @@ def test_keygen_never_writes_into_the_vault(tmp_path, authz):
     before = {p for p in ROLE_ROOT.rglob("*") if p.is_file()}
     subprocess.run(
         [str(SCRIPTS / "sparknet-master-keygen.sh")],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
         env={**os.environ, "SPARKNET_STATE_DIR": str(tmp_path)},
     )
     after = {p for p in ROLE_ROOT.rglob("*") if p.is_file()}
     assert after == before, f"keygen touched the vault: {after ^ before}"
 
     state_dir = os.environ.get("SPARKNET_STATE_DIR", str(ROLE_ROOT / ".state"))
-    strays = [
-        p for p in ROLE_ROOT.rglob("*.ed25519")
-        if not str(p).startswith(str(state_dir))
-    ]
+    strays = [p for p in ROLE_ROOT.rglob("*.ed25519") if not str(p).startswith(str(state_dir))]
     assert not strays, f"a key landed inside the vault, outside the state dir: {strays}"
 
 
@@ -194,12 +187,8 @@ def test_keygen_is_idempotent(tmp_path):
     """Re-running must not rotate keys: a regenerated operational key would
     invalidate every registry entry the old one signed."""
     env = {**os.environ, "SPARKNET_STATE_DIR": str(tmp_path)}
-    subprocess.run([str(SCRIPTS / "sparknet-master-keygen.sh")],
-                   capture_output=True, text=True, check=True, env=env)
+    subprocess.run([str(SCRIPTS / "sparknet-master-keygen.sh")], capture_output=True, text=True, check=True, env=env)
     first = (tmp_path / "keys" / "operational.ed25519").read_text()
-    subprocess.run([str(SCRIPTS / "sparknet-master-keygen.sh")],
-                   capture_output=True, text=True, check=True, env=env)
+    subprocess.run([str(SCRIPTS / "sparknet-master-keygen.sh")], capture_output=True, text=True, check=True, env=env)
     second = (tmp_path / "keys" / "operational.ed25519").read_text()
-    assert first == second, (
-        "the keygen replaced an existing key; rotation must be deliberate"
-    )
+    assert first == second, "the keygen replaced an existing key; rotation must be deliberate"

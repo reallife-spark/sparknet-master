@@ -83,6 +83,7 @@ DEFAULT_ADMIN_TTL_SECONDS = 120
 #: un-elected node, which is honest: with no registry there is nobody to address.
 DEFAULT_REGISTRY = ROLE_ROOT / "manifests" / "node-authorizations.json"
 
+
 #: The default isolated-signer socket, resolved the way the signer's own unit
 #: resolves it so a live console and a live signer agree without extra flags.
 def _default_signer_socket() -> Path:
@@ -190,9 +191,7 @@ def compose_request(
     fails here rather than being signed into something a peer refuses.
     """
     if action not in authz.ADMIN_REQUEST_ACTIONS:
-        raise ConsoleError(
-            f"unknown action {action!r}; expected one of {', '.join(authz.ADMIN_REQUEST_ACTIONS)}"
-        )
+        raise ConsoleError(f"unknown action {action!r}; expected one of {', '.join(authz.ADMIN_REQUEST_ACTIONS)}")
     entity = entity or {}
     missing = [f for f in REQUIRED_ENTITY[action] if not entity.get(f)]
     if missing:
@@ -258,9 +257,7 @@ class SignerClient:
 
     def call(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.socket_path.exists():
-            raise ConsoleError(
-                f"signer socket {self.socket_path} does not exist — is the signer running?"
-            )
+            raise ConsoleError(f"signer socket {self.socket_path} does not exist — is the signer running?")
         connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         connection.settimeout(self.timeout)
         try:
@@ -283,9 +280,7 @@ class SignerClient:
         return response["root_id"]
 
     def sign(self, request: dict[str, Any]) -> dict[str, Any]:
-        response = self.call(
-            {"op": "sign-admin-request", "root_id": self.root_id(), "request": request}
-        )
+        response = self.call({"op": "sign-admin-request", "root_id": self.root_id(), "request": request})
         if not response.get("ok"):
             raise ConsoleError(f"signer refused to sign: {response.get('error')}")
         return response["admin_request"]
@@ -350,9 +345,7 @@ def dispatch(
     """
     endpoint = target.url.rstrip("/") + ADMIN_PATH_PREFIX + action
     body = json.dumps(signed_request).encode("utf-8")
-    request = urllib.request.Request(
-        endpoint, data=body, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    request = urllib.request.Request(endpoint, data=body, headers={"Content-Type": "application/json"}, method="POST")
     open_url = opener or urllib.request.urlopen
     try:
         with open_url(request, timeout=timeout) as response:
@@ -370,6 +363,7 @@ def dispatch(
 
 
 # --- pushing to KDE Connect ---------------------------------------------------
+
 
 def kde_devices_from_env(env: dict[str, str] | None = None) -> list[str]:
     raw = (env if env is not None else os.environ).get("SPARKNET_KDE_DEVICES", "")
@@ -470,9 +464,7 @@ class Console:
             if (entry.get("identity") or {}).get("node_id")
         ]
 
-    def request(
-        self, action: str, target: Target, entity: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    def request(self, action: str, target: Target, entity: dict[str, Any] | None = None) -> dict[str, Any]:
         if not target.node_id or not target.fingerprint:
             # A URL-only target has no identity in the registry to bind to. The
             # signature covers target_node_id and target_fingerprint, so we cannot
@@ -531,7 +523,7 @@ def build_entity(action: str, tokens: list[str]) -> dict[str, Any]:
     fields = REQUIRED_ENTITY[action]
     if len(tokens) < len(fields):
         raise ConsoleError(f"{action} needs {', '.join(fields)}")
-    return dict(zip(fields, tokens))
+    return dict(zip(fields, tokens, strict=False))
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -576,9 +568,7 @@ def main(argv: list[str] | None = None) -> int:
             events = console.feed(specs)
             result: dict[str, Any] = {"ok": True, "count": len(events), "events": events}
             if args.ping:
-                result["notified"] = notify_kde(
-                    f"{len(events)} admin event(s)", devices=kde_devices_from_env() or None
-                )
+                result["notified"] = notify_kde(f"{len(events)} admin event(s)", devices=kde_devices_from_env() or None)
         else:
             action = VERB_ACTIONS[args.verb]
             # The target names the node to talk to; it is NOT an entity field.

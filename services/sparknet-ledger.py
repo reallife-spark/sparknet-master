@@ -36,7 +36,7 @@ ROLE_ROOT = Path(__file__).resolve().parent.parent
 # importing the fabric's single loader. These lines are deliberately the same
 # shape as every shared module; tests/test_contracts.py pins the pattern.
 sys.path.insert(0, str(ROLE_ROOT.parent / "shared"))
-from sparknet_loader import load_shared  # noqa: E402
+from sparknet_loader import load_shared  # noqa: E402 - import after the loader path shim
 
 LEDGER_PATH = ROLE_ROOT / "blockchain" / "ledger.json"
 
@@ -58,11 +58,9 @@ def _load_authz() -> Any:
         "sparknet_authz",
         dirs=[ROLE_ROOT.parent / "shared", ROLE_ROOT / "shared"],
         error=RuntimeError,
-        message=(
-            "cannot locate sparknet-authz.py; this module refuses to reimplement the "
-            "ledger block canonical form"
-        ),
+        message=("cannot locate sparknet-authz.py; this module refuses to reimplement the ledger block canonical form"),
     )
+
 
 #: Event kinds only the Master records. A peer never writes these, because a peer
 #: cannot observe them.
@@ -125,12 +123,11 @@ def verify_chain(ledger: dict[str, Any]) -> tuple[bool, str]:
             return False, f"block {index} ({block['block_id']}) carries no signature"
         if block["prev_hash"] != previous:
             return False, (
-                f"block {index} ({block['block_id']}) links to "
-                f"{block['prev_hash']!r}, expected {previous!r}"
+                f"block {index} ({block['block_id']}) links to {block['prev_hash']!r}, expected {previous!r}"
             )
         try:
             node_pub = authz.public_key_from_b64(str(block["node_pubkey_b64"] or ""))
-        except Exception as exc:  # noqa: BLE001 - any key-parse failure is a bad block
+        except Exception as exc:
             return False, f"block {index} ({block['block_id']}) has an unusable node_pubkey_b64: {exc}"
         if not authz.verify_signature(node_pub, str(block["signature"]), authz.ledger_block_signable(block)):
             return False, (
@@ -139,8 +136,7 @@ def verify_chain(ledger: dict[str, Any]) -> tuple[bool, str]:
             )
         if "hash" in block and block["hash"] != block_hash(block):
             return False, (
-                f"block {index} ({block['block_id']}) has been altered: its "
-                f"contents do not hash to its recorded hash"
+                f"block {index} ({block['block_id']}) has been altered: its contents do not hash to its recorded hash"
             )
         previous = block["hash"] if "hash" in block else block_hash(block)
     return True, f"{len(blocks)} block(s), chain intact"
@@ -169,8 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     command = args[0] if args else "verify"
     if command not in {"verify", "describe"}:
-        print(f"[ledger] unknown command {command!r}; expected verify or describe",
-              file=sys.stderr)
+        print(f"[ledger] unknown command {command!r}; expected verify or describe", file=sys.stderr)
         return 2
     try:
         report = describe()

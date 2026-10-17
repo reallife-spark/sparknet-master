@@ -115,6 +115,5 @@ def test_parity_does_not_reach_the_signer(parity):
     assert "sparknet-signer" not in parity.PEER_SERVICES
     report = parity.parity_report()
     assert any("signer" in entry for entry in report["not_reachable_from_here"]), (
-        "parity_report must state what it cannot reach, so the isolation is "
-        "visible to an operator rather than implied"
+        "parity_report must state what it cannot reach, so the isolation is visible to an operator rather than implied"
     )

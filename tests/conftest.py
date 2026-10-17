@@ -30,10 +30,14 @@ ROLE_ROOT = Path(__file__).resolve().parent.parent
 def resolve_state_dir() -> Path:
     """Ask the env script, exactly as keygen and the signer do."""
     probe = subprocess.run(
-        ["bash", "-c",
-         f'. "{ROLE_ROOT}/scripts/sparknet-master-env.sh" >/dev/null && '
-         'printf "%s" "$SPARKNET_STATE_DIR"'],
-        capture_output=True, text=True, check=True,
+        [
+            "bash",
+            "-c",
+            f'. "{ROLE_ROOT}/scripts/sparknet-master-env.sh" >/dev/null && printf "%s" "$SPARKNET_STATE_DIR"',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
         # HOME is pinned so a test run under an unusual environment still resolves
         # a real path rather than failing on an unset HOME.
         env={**os.environ, "HOME": os.environ.get("HOME", "/nonexistent")},

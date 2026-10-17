@@ -106,16 +106,14 @@ def test_the_admin_agents_resolve_through_the_opencode_cli(tmp_path):
     size = out.stat().st_size
     listing = out.read_text()
     assert result.returncode == 0, (
-        f"`opencode agent list` exited {result.returncode} in {ROLE_ROOT}: "
-        f"{result.stderr[:400]}"
+        f"`opencode agent list` exited {result.returncode} in {ROLE_ROOT}: {result.stderr[:400]}"
     )
     assert listing.strip(), "`opencode agent list` produced no output at all"
     # Guards the mechanism this test depends on. A future opencode that prints less
     # is fine; one that grows past what a pipe would carry is not, and the failure
     # would otherwise look like a broken agent file again.
     assert size == len(listing), (
-        f"agent list is {size} bytes but {len(listing)} characters decoded; the "
-        f"listing is not being read whole"
+        f"agent list is {size} bytes but {len(listing)} characters decoded; the listing is not being read whole"
     )
     assert size > 100_000, (
         f"`opencode agent list` produced only {size} bytes from {ROLE_ROOT}. Expected "
@@ -207,8 +205,7 @@ def test_masterspike_schema_layer_forbids_the_failures_this_role_repeats(spike):
             f"has actually made or is positioned to make."
         )
     assert spike["schema"]["governs"] == ["raw", "wiki"], (
-        "the schema layer must declare that it governs the other two, or it is a "
-        "third document rather than a rulebook"
+        "the schema layer must declare that it governs the other two, or it is a third document rather than a rulebook"
     )
 
 
@@ -252,8 +249,7 @@ def test_the_admin_surface_carries_no_signing_capability(surface):
         # An admin agent may *discuss* signing; it may not be granted it.
         for match in re.finditer(r"capabilit(?:y|ies)[^\n]*", text, re.IGNORECASE):
             assert not re.search(rf"\b{SIGNING}\b", match.group(0)), (
-                f"{agent['file']} appears to grant the `{SIGNING}` capability: "
-                f"{match.group(0)[:120]!r}"
+                f"{agent['file']} appears to grant the `{SIGNING}` capability: {match.group(0)[:120]!r}"
             )
 
     terminal = _load(TERMINAL_CONFIG)
@@ -270,8 +266,7 @@ def test_the_admin_surface_carries_no_signing_capability(surface):
     # separates the surface from the key.
     terminal_text = TERMINAL_CONFIG.read_text()
     assert "SPARKNET_STATE_DIR" in terminal_text, (
-        "the terminal config never mentions the state dir, so nothing denies the "
-        "key that lives in it"
+        "the terminal config never mentions the state dir, so nothing denies the key that lives in it"
     )
 
 
@@ -285,26 +280,19 @@ def test_the_compose_file_mounts_no_key_and_no_signer_socket():
     # Only the non-comment lines. The file discusses the state dir at length in
     # comments precisely to say it must never be mounted, so a whole-file scan
     # would fail on the explanation. What matters is what the config *does*.
-    code = [
-        line for line in COMPOSE.read_text().splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    code = [line for line in COMPOSE.read_text().splitlines() if line.strip() and not line.strip().startswith("#")]
     body = "\n".join(code)
     for forbidden in ("SPARKNET_STATE_DIR", "signer.sock", "/keys", ".ed25519"):
         assert forbidden not in body, (
             f"the admin compose file references {forbidden!r} outside a comment. The "
             f"surface may not mount anything that reaches the operational key."
         )
-    assert "10.100.0.1:8080:8080" in body, (
-        "the admin page must bind the overlay address explicitly, not a wildcard"
-    )
+    assert "10.100.0.1:8080:8080" in body, "the admin page must bind the overlay address explicitly, not a wildcard"
     assert "0.0.0.0" not in body, (
-        "the admin page must never bind a wildcard address; it is reachable only "
-        "from inside the overlay"
+        "the admin page must never bind a wildcard address; it is reachable only from inside the overlay"
     )
     assert "RAG_INGESTION_ENABLED" in body, (
-        "Open WebUI's own RAG store must be disabled in config, or the vault stops "
-        "being the only knowledge base"
+        "Open WebUI's own RAG store must be disabled in config, or the vault stops being the only knowledge base"
     )
 
 
@@ -327,10 +315,14 @@ def test_the_compose_mounts_do_not_reach_the_signing_key():
     import os
 
     probe = subprocess.run(
-        ["bash", "-c",
-         f'. "{ROLE_ROOT}/scripts/sparknet-master-env.sh" >/dev/null && '
-         'printf "%s" "$SPARKNET_STATE_DIR"'],
-        capture_output=True, text=True, check=True,
+        [
+            "bash",
+            "-c",
+            f'. "{ROLE_ROOT}/scripts/sparknet-master-env.sh" >/dev/null && printf "%s" "$SPARKNET_STATE_DIR"',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
         env={**os.environ, "HOME": os.environ.get("HOME", "/nonexistent")},
     )
     state_dir = Path(probe.stdout.strip()).resolve()
@@ -341,10 +333,7 @@ def test_the_compose_mounts_do_not_reach_the_signing_key():
         "mounting the vault, this test is asserting nothing — fix the test."
     )
 
-    covered = [
-        (m, (COMPOSE.parent / m).resolve())
-        for m in mounts
-    ]
+    covered = [(m, (COMPOSE.parent / m).resolve()) for m in mounts]
     for source, resolved in covered:
         assert state_dir != resolved and resolved not in state_dir.parents, (
             f"the state dir {state_dir} is inside the bind mount {source} -> {resolved}. "
@@ -358,10 +347,7 @@ def test_the_compose_mounts_do_not_reach_the_signing_key():
         "re-check that it still cannot see the signing key."
     )
     for vault in vault_mounts:
-        stray = [
-            p for p in vault.rglob("*.ed25519")
-            if p.is_file() and ".local" not in p.parts
-        ]
+        stray = [p for p in vault.rglob("*.ed25519") if p.is_file() and ".local" not in p.parts]
         assert not stray, (
             f"key material inside {vault}, which is bind-mounted into the admin "
             f"surface: {stray}. Move it out rather than documenting why it is safe."
@@ -447,6 +433,5 @@ def test_the_wiki_suite_resolves_this_role_as_its_own_vault():
     )
     for skill in ("wiki-status", "wiki-ingest", "wiki-query", "wiki-lint"):
         assert (FABRIC_ROOT / ".opencode" / "skills" / skill / "SKILL.md").is_file(), (
-            f"the vendored {skill} skill is missing; the role has no global skill "
-            f"farm to fall back on by design"
+            f"the vendored {skill} skill is missing; the role has no global skill farm to fall back on by design"
         )

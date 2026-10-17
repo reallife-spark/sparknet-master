@@ -79,6 +79,7 @@ from typing import Any
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 
+
 def _default_state_dir() -> Path:
     """Outside the vault, always. See scripts/sparknet-master-env.sh.
 
@@ -239,8 +240,7 @@ def check_root(root: dict[str, Any], consensus: Any, node_id: str) -> None:
     canonical = consensus.canonical_root(root)
     if canonical["master_node_id"] != node_id:
         raise SignerError(
-            f"this node is {node_id!r} but the root names "
-            f"{canonical['master_node_id']!r} as Master; refusing to sign"
+            f"this node is {node_id!r} but the root names {canonical['master_node_id']!r} as Master; refusing to sign"
         )
 
 
@@ -254,9 +254,7 @@ def check_key_matches_root(public_key_b64: str, root: dict[str, Any], consensus:
         )
 
 
-def check_not_reverted(
-    ledger_path: Path, consensus: Any, root: dict[str, Any], allow_requalification: bool
-) -> None:
+def check_not_reverted(ledger_path: Path, consensus: Any, root: dict[str, Any], allow_requalification: bool) -> None:
     """Refuse to start against a root older than one this node has already served.
 
     A stale root is the hardest case in this file, because on its own it is
@@ -290,21 +288,14 @@ def check_not_reverted(
         ) from exc
 
     incoming = consensus.root_id(root)
-    ledgers = [
-        block.get("data", {}).get("root_id")
-        for block in ledger.get("blocks", [])
-        if isinstance(block, dict)
-    ]
+    ledgers = [block.get("data", {}).get("root_id") for block in ledger.get("blocks", []) if isinstance(block, dict)]
     ledgers = [root_id for root_id in ledgers if root_id]
     if not ledgers:
         return
     in_force = ledgers[-1]
     if incoming == in_force:
         return
-    if (
-        not allow_requalification
-        and consensus.canonical_root(root).get("previous_root_id", "") == in_force
-    ):
+    if not allow_requalification and consensus.canonical_root(root).get("previous_root_id", "") == in_force:
         # Chained re-formation, policy B: this root names the ledger's root in
         # force as its parent, so it is provably newer than anything this signer
         # has signed under — forward adoption, not a revert. The chain is the
@@ -453,10 +444,7 @@ class Signer:
             return self._refuse("malformed request: expected a JSON object")
         op = request.get("op")
         if op not in OPERATIONS:
-            return self._refuse(
-                f"unknown operation {op!r}; this signer answers only "
-                f"{', '.join(OPERATIONS)}"
-            )
+            return self._refuse(f"unknown operation {op!r}; this signer answers only {', '.join(OPERATIONS)}")
 
         if op in READ_OPERATIONS:
             return self._read(op)
@@ -570,7 +558,8 @@ class Signer:
 
         message = json.dumps(
             {k: approval[k] for k in sorted(approval)},
-            sort_keys=True, separators=(",", ":"),
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode("utf-8")
         signature_b64 = self.authz.sign_bytes(self.key, message)
         block = self._record(op, str(approval["peer_fingerprint"]), signature_b64)
@@ -595,9 +584,7 @@ class Signer:
 
         now = (self.clock or (lambda: datetime.now(timezone.utc)))()
         if self.authz.is_expired(unsigned["expires_at"], now):
-            return self._refuse(
-                f"refusing to sign a cluster job that expired at {unsigned['expires_at']}"
-            )
+            return self._refuse(f"refusing to sign a cluster job that expired at {unsigned['expires_at']}")
 
         signature_b64 = self.authz.sign_bytes(self.key, message)
         block = self._record(op, str(unsigned["job_id"]), signature_b64)
@@ -623,9 +610,7 @@ class Signer:
 
         now = (self.clock or (lambda: datetime.now(timezone.utc)))()
         if self.authz.is_expired(unsigned["expires_at"], now):
-            return self._refuse(
-                f"refusing to sign an admin request that expired at {unsigned['expires_at']}"
-            )
+            return self._refuse(f"refusing to sign an admin request that expired at {unsigned['expires_at']}")
 
         signature_b64 = self.authz.sign_bytes(self.key, message)
         block = self._record(op, str(unsigned["request_id"]), signature_b64)
@@ -683,9 +668,7 @@ def serve(
     # unconverted text); normalise here so the transport itself only ever sees a Path.
     socket_path = Path(socket_path)
     if not hasattr(socket, "AF_UNIX"):  # pragma: no cover - defensive
-        raise SignerError(
-            "this platform has no unix sockets; refusing to substitute TCP for a key service"
-        )
+        raise SignerError("this platform has no unix sockets; refusing to substitute TCP for a key service")
     if socket_path.exists():
         socket_path.unlink()
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -718,9 +701,7 @@ class _RequestTooLarge(Exception):
     """The client's line exceeded the per-request size cap."""
 
 
-def _read_line(
-    connection: socket.socket, max_request_bytes: int, read_timeout: float
-) -> bytes:
+def _read_line(connection: socket.socket, max_request_bytes: int, read_timeout: float) -> bytes:
     """One line. Deadline-based, so a trickle of bytes does not reset the clock."""
     deadline = time.monotonic() + read_timeout
     buffered = b""
@@ -783,7 +764,7 @@ def _serve_one(
         with sign_lock:
             try:
                 response = signer.handle(request)
-            except Exception as exc:  # noqa: BLE001 - one bad request must not kill the signer
+            except Exception as exc:
                 # The signer stays up. A process that exits on a malformed request turns a
                 # bug in a caller into a cluster-wide loss of signing.
                 response = {"ok": False, "error": f"internal error: {exc}"}
@@ -810,7 +791,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--socket", default=str(DEFAULT_STATE_DIR / "signer" / "signer.sock"))
     parser.add_argument("--ledger", type=Path, default=ROLE_ROOT / "blockchain" / "ledger.json")
     parser.add_argument(
-        "--accept-requalification", action="store_true",
+        "--accept-requalification",
+        action="store_true",
         help=(
             "allow starting against a root other than the one this node's ledger "
             "already records. Required for re-formation and refused by default, so "
@@ -818,7 +800,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--describe", action="store_true",
+        "--describe",
+        action="store_true",
         help="print the isolation posture and exit without binding a socket",
     )
     args = parser.parse_args(argv)
@@ -839,7 +822,12 @@ def main(argv: list[str] | None = None) -> int:
         authz, consensus = load_modules()
         root = json.loads(args.root.read_text())
         signer = Signer(
-            args.node_id, args.key, root, authz, consensus, Path(args.ledger),
+            args.node_id,
+            args.key,
+            root,
+            authz,
+            consensus,
+            Path(args.ledger),
             allow_requalification=args.accept_requalification,
         )
     except (SignerError, OSError, json.JSONDecodeError) as exc:

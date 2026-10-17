@@ -130,15 +130,15 @@ class FakeBridge:
             def log_message(self, *args):  # silence the test output
                 return
 
-            def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler's name
+            def do_POST(self):
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length)
                 payload = json.loads(raw.decode("utf-8"))
                 bridge.calls.append(("POST", self.path, payload))
                 signature = payload.get("signature_b64", "")
-                assert authz.verify_signature(
-                    bridge.public_key, signature, authz.admin_request_message(payload)
-                ), "the peer must only ever receive a validly signed request"
+                assert authz.verify_signature(bridge.public_key, signature, authz.admin_request_message(payload)), (
+                    "the peer must only ever receive a validly signed request"
+                )
                 out = json.dumps(bridge.body if bridge.body is not None else {"ok": True}).encode()
                 self.send_response(bridge.status)
                 self.send_header("Content-Type", "application/json")
@@ -198,16 +198,23 @@ def test_compose_projects_the_shared_field_set():
 def test_compose_refuses_an_unknown_action():
     with pytest.raises(console.ConsoleError, match="unknown action"):
         console.compose_request(
-            authz, action="root-everything", master_node_id="m",
-            target_node_id="p", target_fingerprint="x",
+            authz,
+            action="root-everything",
+            master_node_id="m",
+            target_node_id="p",
+            target_fingerprint="x",
         )
 
 
 def test_compose_refuses_a_missing_entity_field():
     with pytest.raises(console.ConsoleError, match="requires role"):
         console.compose_request(
-            authz, action="set_user_role", master_node_id="m",
-            target_node_id="p", target_fingerprint="x", entity={"user_id": "u1"},
+            authz,
+            action="set_user_role",
+            master_node_id="m",
+            target_node_id="p",
+            target_fingerprint="x",
+            entity={"user_id": "u1"},
         )
 
 
@@ -221,9 +228,7 @@ def test_entity_requirements_match_the_peer_bridge():
         "sparknet_dispatch_bridge_console_test",
         FABRIC_ROOT / "peer-node" / "services" / "sparknet-dispatch-bridge.py",
     )
-    assert console.REQUIRED_ENTITY == {
-        action: tuple(fields) for action, fields in bridge.ADMIN_ENTITY_FIELDS.items()
-    }
+    assert {action: tuple(fields) for action, fields in bridge.ADMIN_ENTITY_FIELDS.items()} == console.REQUIRED_ENTITY
     assert set(console.REQUIRED_ENTITY) == set(authz.ADMIN_REQUEST_ACTIONS), (
         "a shared action must have a console entity rule, and vice versa"
     )
@@ -235,8 +240,12 @@ def test_entity_requirements_match_the_peer_bridge():
 def test_signer_client_round_trips_root_id_and_sign(signer: FakeSigner, master_key: Ed25519PrivateKey):
     client = console.SignerClient(signer.socket_path)
     request = console.compose_request(
-        authz, action="list_users", master_node_id="master-0001",
-        target_node_id="peer-1", target_fingerprint="f" * 64, clock=lambda: NOW,
+        authz,
+        action="list_users",
+        master_node_id="master-0001",
+        target_node_id="peer-1",
+        target_fingerprint="f" * 64,
+        clock=lambda: NOW,
     )
     signed = client.sign(request)
     assert signed["signature_b64"]
@@ -262,7 +271,8 @@ def test_send_signs_and_dispatches_end_to_end(
     try:
         monkeypatch.setattr(console, "bridge_url", lambda ip, port=console.BACKING_PORT: bridge.base())
         con = console.Console(
-            master_node_id="master-0001", authz=authz,
+            master_node_id="master-0001",
+            authz=authz,
             client=console.SignerClient(signer.socket_path),
             registry=None,
         )
@@ -286,9 +296,14 @@ def test_dispatch_hands_a_webui_refusal_through(master_key: Ed25519PrivateKey):
     try:
         target = console.Target(node_id="peer-1", fingerprint="f" * 64, url=bridge.base())
         signed = {
-            "request_id": "r", "master_node_id": "m", "target_node_id": "peer-1",
-            "target_fingerprint": "f" * 64, "issued_at": NOW.isoformat(),
-            "expires_at": NOW.isoformat(), "nonce": "n", "action": "list_users",
+            "request_id": "r",
+            "master_node_id": "m",
+            "target_node_id": "peer-1",
+            "target_fingerprint": "f" * 64,
+            "issued_at": NOW.isoformat(),
+            "expires_at": NOW.isoformat(),
+            "nonce": "n",
+            "action": "list_users",
         }
         signed["signature_b64"] = authz.sign_bytes(master_key, authz.admin_request_message(signed))
         result = console.dispatch(target, "list_users", signed)
@@ -345,18 +360,24 @@ def _console_with_send(payloads: dict[str, dict]) -> console.Console:
 
 def test_feed_merges_and_dedupes_across_nodes():
     payloads = {
-        "peer-1": {"node": "peer-1", "events": [
-            {"event": "auth.login", "ts": "2026-10-07T10:00:00Z", "actor": "ana"},
-            {"event": "auth.signup", "ts": "2026-10-07T09:00:00Z", "actor": "bob"},
-        ]},
-        "peer-2": {"node": "peer-2", "events": [
-            {"event": "auth.login", "ts": "2026-10-07T11:00:00Z", "actor": "ana"},
-        ]},
+        "peer-1": {
+            "node": "peer-1",
+            "events": [
+                {"event": "auth.login", "ts": "2026-10-07T10:00:00Z", "actor": "ana"},
+                {"event": "auth.signup", "ts": "2026-10-07T09:00:00Z", "actor": "bob"},
+            ],
+        },
+        "peer-2": {
+            "node": "peer-2",
+            "events": [
+                {"event": "auth.login", "ts": "2026-10-07T11:00:00Z", "actor": "ana"},
+            ],
+        },
     }
     events = _console_with_send(payloads).feed(["peer-1", "peer-2"])
-    assert [e["ts"] for e in events] == [
-        "2026-10-07T09:00:00Z", "2026-10-07T10:00:00Z", "2026-10-07T11:00:00Z"
-    ], "the feed must be time-ordered across nodes"
+    assert [e["ts"] for e in events] == ["2026-10-07T09:00:00Z", "2026-10-07T10:00:00Z", "2026-10-07T11:00:00Z"], (
+        "the feed must be time-ordered across nodes"
+    )
     assert {e["node"] for e in events} == {"peer-1", "peer-2"}
 
 
@@ -402,11 +423,20 @@ def test_notify_kde_is_a_noop_without_the_binary():
 
 
 def test_cli_dry_run_composes_without_signing(capsys: pytest.CaptureFixture):
-    rc = console.main([
-        "role", "peer-1", "u1", "admin",
-        "--master-node-id", "master-0001", "--dry-run", "--json",
-        "--registry", "/nonexistent/registry.json",
-    ])
+    rc = console.main(
+        [
+            "role",
+            "peer-1",
+            "u1",
+            "admin",
+            "--master-node-id",
+            "master-0001",
+            "--dry-run",
+            "--json",
+            "--registry",
+            "/nonexistent/registry.json",
+        ]
+    )
     # The registry is only needed to resolve the target, which dry-run still does.
     assert rc == 1
     assert "registry" in capsys.readouterr().err
@@ -438,9 +468,7 @@ def test_main_maps_positional_entity_without_the_target(monkeypatch: pytest.Monk
     assert rc == 0
     assert seen == {"action": "approve_user", "spec": "peer-1", "entity": {"user_id": "u1"}}
 
-    rc = console.main(
-        ["role", "peer-2", "u9", "admin", "--master-node-id", "m1", "--registry", "reg.json"]
-    )
+    rc = console.main(["role", "peer-2", "u9", "admin", "--master-node-id", "m1", "--registry", "reg.json"])
     assert rc == 0
     assert seen == {
         "action": "set_user_role",

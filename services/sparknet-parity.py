@@ -94,10 +94,7 @@ def load_peer_service(name: str) -> ModuleType:
     an AttributeError about ``__dict__`` that says nothing about the cause.
     """
     if name not in PEER_SERVICES:
-        raise ParityError(
-            f"{name!r} is not a peer service this role runs; expected one of "
-            f"{', '.join(PEER_SERVICES)}"
-        )
+        raise ParityError(f"{name!r} is not a peer service this role runs; expected one of {', '.join(PEER_SERVICES)}")
     directory = peer_services_dir()
     module_name = "sparknet_peer_" + name.removesuffix(".py").replace("-", "_")
     if module_name in sys.modules:

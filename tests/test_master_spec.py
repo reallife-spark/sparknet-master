@@ -52,9 +52,7 @@ def test_plan_cursor_exists_and_points_at_a_real_step() -> None:
     cursor = match.group(1)
     if cursor == "done":
         return
-    assert f"**Step {cursor}**" in text, (
-        f"plan cursor points at Step {cursor}, which is not defined in the plan"
-    )
+    assert f"**Step {cursor}**" in text, f"plan cursor points at Step {cursor}, which is not defined in the plan"
 
 
 def test_every_step_has_a_verifiable_dod() -> None:
@@ -65,9 +63,7 @@ def test_every_step_has_a_verifiable_dod() -> None:
     for step in steps:
         section = text.split(f"**Step {step}**", 1)[1].split("**Step ", 1)[0]
         assert "**DoD**" in section, f"Step {step} has no DoD"
-        assert re.search(r"\(\d\)|DoD: confirm: user|DoD", section), (
-            f"Step {step} DoD is not checkable"
-        )
+        assert re.search(r"\(\d\)|DoD: confirm: user|DoD", section), f"Step {step} DoD is not checkable"
 
 
 def test_the_role_has_an_executable_surface() -> None:
@@ -89,20 +85,16 @@ def test_every_executable_directory_is_wired_to_something() -> None:
     a make target, so an unrunnable service is a build failure rather than a
     surprise at deploy time."""
     makefile = (VAULT_ROOT / "Makefile").read_text()
-    units = "\n".join(
-        u.read_text() for u in (VAULT_ROOT / "systemd").glob("*.service")
-    )
+    units = "\n".join(u.read_text() for u in (VAULT_ROOT / "systemd").glob("*.service"))
     for name in EXECUTABLE_DIRS:
         entries = sorted(
-            p.name for p in (VAULT_ROOT / name).iterdir()
-            if p.is_file() and not p.name.endswith((".md", ".pyc"))
+            p.name for p in (VAULT_ROOT / name).iterdir() if p.is_file() and not p.name.endswith((".md", ".pyc"))
         )
         assert entries, f"{name}/ is empty"
         for entry in entries:
             referenced = entry in units or entry in makefile
             assert referenced, (
-                f"{name}/{entry} is not referenced by any systemd unit or Makefile "
-                f"target, so nothing would ever run it"
+                f"{name}/{entry} is not referenced by any systemd unit or Makefile target, so nothing would ever run it"
             )
 
 
@@ -116,11 +108,14 @@ def test_pages_do_not_still_claim_the_role_is_unbuilt(page: Path) -> None:
     if not page.is_file():
         pytest.skip(f"{page.name} not present")
     text = page.read_text()
-    stale = re.search(r"nothing here runs yet|is documented as unbuilt|"
-                       r"status:\s*\**specified, not built", text, re.I)
+    stale = re.search(
+        r"nothing here runs yet|is documented as unbuilt|"
+        r"status:\s*\**specified, not built",
+        text,
+        re.I,
+    )
     assert stale is None, (
-        f"{page.name} still claims the role is unbuilt: {stale.group(0)!r}. "
-        f"Describe what works instead."
+        f"{page.name} still claims the role is unbuilt: {stale.group(0)!r}. Describe what works instead."
     )
 
 
@@ -130,10 +125,9 @@ def test_claiming_pages_name_something_real() -> None:
         if not page.is_file():
             continue
         text = page.read_text()
-        assert any(
-            token in text
-            for token in ("services/", "scripts/", "systemd/", "signer")
-        ), f"{page.name} must describe the executable surface, not just deny it"
+        assert any(token in text for token in ("services/", "scripts/", "systemd/", "signer")), (
+            f"{page.name} must describe the executable surface, not just deny it"
+        )
 
 
 def test_charter_does_not_hard_code_a_machine_path() -> None:
@@ -154,8 +148,7 @@ def test_master_template_is_documentation_only() -> None:
     assert "10.100.0." in text, "template should document the Master overlay address"
     live = VAULT_ROOT / "configs" / "wireguard" / "wg0.conf"
     assert not live.exists(), (
-        "a live wg0.conf in the vault would be machine state; the template is "
-        "rendered to .state/ at provisioning time"
+        "a live wg0.conf in the vault would be machine state; the template is rendered to .state/ at provisioning time"
     )
 
 
@@ -177,11 +170,12 @@ def test_private_key_is_never_in_the_vault(state_dir) -> None:
     """
     import subprocess
 
-    patterns = ("master-node/**.ed25519", "master-node/**.key",
-                "master-node/**.pem", "master-node/**privkey*")
+    patterns = ("master-node/**.ed25519", "master-node/**.key", "master-node/**.pem", "master-node/**privkey*")
     tracked = subprocess.run(
         ["git", "-C", str(FABRIC_ROOT), "ls-files", *patterns],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.split()
     assert not tracked, (
         f"private key material is tracked by git: {tracked}. It is in history — "
@@ -194,7 +188,8 @@ def test_private_key_is_never_in_the_vault(state_dir) -> None:
         f"here is readable from it."
     )
     suspicious = [
-        p for p in VAULT_ROOT.rglob("*")
+        p
+        for p in VAULT_ROOT.rglob("*")
         if p.is_file()
         and p.suffix not in {".pyc"}
         and "sessions" not in p.parts
@@ -216,15 +211,14 @@ def test_state_dir_private_keys_are_not_world_readable(state_dir) -> None:
         pytest.skip("no keys generated yet on this host (run `make keygen`)")
 
     mode_dir = stat.S_IMODE(keys_dir.stat().st_mode)
-    assert mode_dir == 0o700, (
-        f"{keys_dir} is mode {oct(mode_dir)}; the key directory must be 0700"
-    )
+    assert mode_dir == 0o700, f"{keys_dir} is mode {oct(mode_dir)}; the key directory must be 0700"
     for key in keys_dir.glob("*.ed25519"):
         mode = stat.S_IMODE(key.stat().st_mode)
         assert mode == 0o600, (
             f"{key} is mode {oct(mode)}; a private half must be 0600. This is the "
             f"one assertion standing between a keygen run and a readable key."
         )
+
 
 def test_the_identity_manifest_uses_the_contract_field_names():
     """A manifest whose field names drift from the contract hashes to nothing.
@@ -245,9 +239,7 @@ def test_the_identity_manifest_uses_the_contract_field_names():
     manifest = json.loads((root / "master-node/manifests/node-identity.json").read_text())
     contract = json.loads((root / "contracts/identity-schema.json").read_text())
 
-    spec = importlib.util.spec_from_file_location(
-        "spec_authz_field_check", root / "shared/sparknet-authz.py"
-    )
+    spec = importlib.util.spec_from_file_location("spec_authz_field_check", root / "shared/sparknet-authz.py")
     authz = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = authz
     spec.loader.exec_module(authz)
