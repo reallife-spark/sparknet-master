@@ -26,8 +26,6 @@ done
 STATE_DIR="${SPARKNET_STATE_DIR:?missing}"
 OP_PUB="$STATE_DIR/keys/operational.pub.b64"
 [ -f "$OP_PUB" ] || { echo "pub missing" >&2; exit 1; }
-CL_PUB="$STATE_DIR/keys/cluster.pub.b64"
-M_PUB="$STATE_DIR/keys/identity.pub.b64"
 
 PY="${PY:-$FABRIC_ROOT/.venv/bin/python}"
 [ -x "$PY" ] || PY="$(command -v python3)"

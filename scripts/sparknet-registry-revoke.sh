@@ -6,18 +6,20 @@ ROLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROLE_ROOT/scripts/sparknet-master-env.sh" >/dev/null
 
 IDENTITY=""
-CAPS="telemetry,guard-read"
 OUT=""
 
 usage() {
   cat <<'USAGE'
-usage: sparknet-registry-revoke.sh --identity <identity.json> [--capabilities c1,c2] [--out <entry.json>]
+usage: sparknet-registry-revoke.sh --identity <identity.json> [--out <entry.json>]
+
+Signs a REVOKED authorization for an identity. The entry grants nothing, so
+there is no capability list to set: --capabilities used to be accepted here and
+silently ignored, which is worse than not offering it.
 USAGE
 }
 while [ $# -gt 0 ]; do
   case "$1" in
     --identity) IDENTITY="$2"; shift 2 ;;
-    --capabilities) CAPS="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage; exit 1 ;;

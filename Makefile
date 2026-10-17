@@ -274,7 +274,6 @@ registry-verify: ## Verify a registry (needs REGISTRY)
 revoke: ## Sign a revoked entry for an identity (needs IDENTITY)
 	@test -n "$(IDENTITY)" || (echo "IDENTITY=<identity.json> required" >&2; exit 1)
 	@$(ROLE_ROOT)/scripts/sparknet-registry-revoke.sh --identity "$(IDENTITY)" \
-	  $$(test -n "$(CAPS)" && echo --capabilities "$(CAPS)") \
 	  $$(test -n "$(OUT)" && echo --out "$(OUT)")
 
 wg-render-master: ## Render Master wg0 from registry (needs REGISTRY, optional OUT)
