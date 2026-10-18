@@ -19,7 +19,16 @@ FABRIC_ROOT ?= $(patsubst %/,%,$(dir $(VAULT_ROOT)))
 ROLE_ROOT := $(VAULT_ROOT)
 
 VENV_PY := $(VAULT_ROOT)/.venv/bin/python
-PY := $(if $(wildcard $(VENV_PY)),$(VENV_PY),python3)
+# Interpreter for role targets: this subvault's own venv if it has one, else
+# the fabric venv that `make devtools` at the fabric root creates, else python3.
+# The middle tier is what makes a fabric checkout honest — `make ci` provisions
+# only the fabric venv, and without it every role target falls through to
+# whatever system python exists, which on a runner has no `cryptography`
+# (first bare-clone run failed `validate` in the ledger target exactly there).
+# On a standalone role deployment there is no fabric venv, so the chain simply
+# ends at python3 as before.
+FABRIC_VENV_PY := $(FABRIC_ROOT)/.venv/bin/python
+PY := $(if $(wildcard $(VENV_PY)),$(VENV_PY),$(if $(wildcard $(FABRIC_VENV_PY)),$(FABRIC_VENV_PY),python3))
 
 .PHONY: help env-init validate status plan test test-all lint spec-check \
         env-show parity ledger keygen keys-check units units-check \
