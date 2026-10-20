@@ -47,6 +47,7 @@ BRINGUP="$PEER_NODE/scripts/sparknet-wg-bringup.sh"
 
 # If anything below fails after the unlock, re-pin whatever exists before we
 # exit, so a mid-sequence failure never leaves the live overlay config writable.
+# shellcheck disable=SC2329  # reached indirectly, via `trap repin_on_exit EXIT`
 repin_on_exit() {
   local rc=$?
   if (( rc != 0 )); then
@@ -55,7 +56,7 @@ repin_on_exit() {
     done
     log "master anchor failed (rc=$rc); re-pinned any existing config before exit"
   fi
-  return $rc
+  return "$rc"
 }
 trap repin_on_exit EXIT
 
