@@ -609,12 +609,13 @@ containment and scheduling.
         wiki / schema layers; `manifests/admin-surface.json` declares the granted
         and `explicitly_not_granted` capabilities with `sign` among the latter;
         `configs/admin-surface/` holds the overlay-bound Open WebUI compose file
-        and the opencode terminal config; port 8080 is contracted as
+        and the opencode terminal config; port 8088 (relocated from 8080, fabric
+        Step 55) is contracted as
         `provisioned` / `not-verifiable-here`; `make wiki-preflight` resolves
         `master-node/`. 12 tests in `master-node/tests/test_admin_surface.py`.
       - **DoD: confirm: user** for (3) only — whether an operator can actually
         reach the page. Open WebUI is not installed here and no overlay interface
-        exists, so nothing binds `10.100.0.1:8080`. The declaration is verified;
+        exists, so nothing binds `10.100.0.1:8088`. The declaration is verified;
         the reachability is not, and is recorded as `provisioned` rather than
         `implemented` precisely because config without a listener is not a page.
       - **Note**: the admin surface is where the injection risk lives, which is
@@ -664,7 +665,8 @@ containment and scheduling.
         broadcast.
       - **Not verified here, and claimed nowhere.** Listed rather than passed:
         - *Live admin page reachability* — `DoD: confirm: user` (Step 18). Nothing
-          binds `10.100.0.1:8080`; Open WebUI is not installed and no overlay
+          binds `10.100.0.1:8088` (relocated from 8080, fabric Step 55); Open WebUI
+          is not installed and no overlay
           interface exists on this host.
         - *Deployed signer containment* — `DoD: confirm: user` (Step 17). The unit
           is staged and excluded from `make units` on purpose. Topology is proven;
@@ -738,7 +740,7 @@ containment and scheduling.
         bridge `/admin/*` route, carrying a signature the peer verifies under
         `admin-supervise` before any WebUI call; (2) approval/role change/KB read
         are expressible and audited; (3) the admin surface binds
-        `10.100.0.1:8080` per `../contracts/ports.json` (Step 18's open leg);
+        `10.100.0.1:8088` per `../contracts/ports.json` (Step 18's open leg);
         (4) KDE Connect pages the operator on signup/login; (5) no peer exposes
         a human admin (service account only). **DoD: confirm: user** — the live
         legs are operator-verified on `.131`/`.133`.
@@ -756,7 +758,8 @@ containment and scheduling.
         admin on a peer (service account only) — with one console defect fixed
         (the CLI prepended the target node as the first entity field, breaking
         every `user_id` action). **Still open — DoD (3)**: the console/admin
-        surface is not yet bound on `10.100.0.1:8080` (Step 18's open leg).
+        surface is not yet bound on `10.100.0.1:8088` (relocated from 8080, fabric
+        Step 55; Step 18's open leg).
         Cursor stays at Step 2.
 
 ## Sequencing note

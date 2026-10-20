@@ -20,16 +20,28 @@ authority over the overlay.
 > refused non-Master keys/unnamed nodes/tampered roots, and demonstrated a
 > live revoke→peer-inert→re-authorize cycle.
 >
-> Still genuinely open: the admin page is *declared*, not bound — nothing
-> listens on `10.100.0.1:8080` yet (`DoD: confirm: user`, Step 18). Phase 9's
+> The admin surface is **deployed on the live Master (agx32)**: the container
+> `sparknet-admin-webui` runs the committed topology and binds `10.100.0.1:8088`
+> (relocated 8080→8088, fabric Step 55). The overlay anchor carries
+> `Before=docker.service`, so the address exists before any container binds it —
+> without that ordering the container died at boot with `bind: cannot assign
+> requested address` (exit 128). Reachability from an operator client is still
+> `DoD: confirm: user`, Step 18. Phase 9's
 > destructive legs (rollback; replace-Master re-formation with a new nonce)
 > are documented in `contracts/deployment-runbook.md` and deliberately left
 > unexecuted by operator decision — do not describe them as run. The signer
 > unit stays excluded from `make units` by design: enabling a process that
 > holds the Master signing key belongs to the election, not the role install.
-> The one deploy-time caveat recorded: the overlay doesn't survive reboot on
-> the tegra host (`CONFIG_WIREGUARD=n`; userspace `wireguard-go`), restored
-> with `/root/scripts/sparknet-wg-restore.sh` — a Phase 9/ops item.
+> The overlay-reboot caveat is **closed** (2026-10-19): the tegra host has no
+> kernel module (`CONFIG_WIREGUARD=n`), so `wg-quick` is unusable there. Both
+> roles now bring the overlay up through the peer's `scripts/sparknet-wg-bringup.sh`
+> (userspace `wireguard-go`), driven by an enabled systemd anchor unit —
+> `sparknet-wireguard-anchor.service` (peer) and
+> `sparknet-master-wireguard-anchor.service` (master), the latter in `make units`.
+> A **real reboot of each host (2026-10-19)** restored the overlay unattended; on
+> the master the admin container also auto-started and bound `10.100.0.1:8088`
+> (the anchor carries `Before=docker.service`). The old ad-hoc
+> `/root/scripts/sparknet-wg-restore.sh` is retired.
 
 This is a standalone knowledge vault. A session started inside
 `master-node/` resolves to *this* directory as its knowledge base, not to the

@@ -1,6 +1,6 @@
 ---
 title: sparknet master-node — vault index
-updated: 2026-10-06
+updated: 2026-10-18
 ---
 
 # master-node vault index
@@ -40,9 +40,12 @@ Links on this page are wikilinks so they resolve whether the page is opened as
 ## Where to start
 
 - Session memory: `MEMORY.md`, then `02_Daily/<today>.md`
-- Work in flight: [[MASTER_BUILD_PLAN]] roles forward; the Master is elected,
-  not assumed — `PLAN.md`'s `current:` field names the step
-- Infrastructure administration (git, file share, NAT, vector DB — all
-  spec-only): [[MASTER_ADMIN_PLAN]]
+- Work in flight: [[MASTER_BUILD_PLAN]] — `plans/MASTER_BUILD_PLAN.md`'s
+  `current:` names the step. The Master is elected, not assumed: the
+  election/signer arc is proven live (2026-10-07); the admin surface is
+  declared, not bound
+- Infrastructure administration: [[MASTER_ADMIN_PLAN]] — the admin
+  federation (`admin-supervise`) ran live on the pair 2026-10-12; git, file
+  share, NAT and the vector DB remain spec-only
 - The rules: [[alpha-admin]]
 - The contract (single source of truth): `contracts/tracking-schema.json`

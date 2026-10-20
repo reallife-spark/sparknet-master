@@ -1,0 +1,32 @@
+# Brings the Master's WireGuard overlay (10.100.0.1) up at boot and pins its config.
+#
+# The overlay is the transport every Master decision travels over, so it has to
+# survive a reboot — including on hosts without the wireguard kernel module
+# (Jetson/L4T ships CONFIG_WIREGUARD=n), where the bring-up uses wireguard-go.
+# The sequence lives in sparknet-master-wireguard-anchor.sh, invoked through a
+# generated shim so this unit carries no vault path.
+#
+# No ExecStop: tearing the overlay down is the root-gated KillSwitch's decision,
+# never a plain `systemctl stop`.
+[Unit]
+Description=Sparknet Master WireGuard anchor (10.100.0.1; bring up + pin)
+After=network-online.target
+Wants=network-online.target
+# The overlay address must exist before any container that binds it (the admin
+# surface on 10.100.0.1:8088) is started by the Docker daemon.
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# SPARKNET_WG_INTERFACE (and the rest of this node's paths) come from the role's
+# .env, which the anchor sources. The leading '-' keeps the unit bootable if it
+# is absent.
+EnvironmentFile=-/etc/sparknet/master-wireguard.env
+ExecStart=/usr/local/libexec/sparknet/sparknet-master-wireguard-anchor
+TimeoutStartSec=60
+# No ExecStop: tearing the overlay down is the KillSwitch's decision, never a
+# plain `systemctl stop`.
+
+[Install]
+WantedBy=multi-user.target

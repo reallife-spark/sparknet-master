@@ -3,7 +3,7 @@ type: user-record
 schema: sparknet-user/1
 status: filled
 owner_id: U-97443
-owner_node: REPLACE_WITH_NODE_ID
+owner_node: sparknet-node-0002
 role: owner
 immutable: true
 authorised_senders: []
@@ -63,5 +63,8 @@ is attributable without asking anything else where it came from.
 The user key **consents and attributes**; it grants no capability. The
 Master's *authority* comes from key possession over the capability vocabulary
 — and here it illuminates the difference: this file is the operator identity,
-while `services/sparknet-signer.py` is the *operational* signing role, which
-is a separate concern that has never been deployed.
+while `services/sparknet-signer.py` is the *operational* signing role — a
+separate concern whose election→signer arc was proven live on the real pair
+2026-10-07 (role charter), while its unit deliberately stays out of `make
+units`: enabling a key-holding process belongs to the election, not the role
+install.

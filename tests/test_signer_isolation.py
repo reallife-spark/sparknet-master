@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import importlib.util
+import itertools
 import json
 import os
 import re
@@ -398,6 +399,38 @@ def test_a_chained_descendant_root_is_adopted_without_the_flag(
     assert adopted.root_id != first.root_id, "the descendant is a new root, not the held one"
     assert consensus.canonical_root(descendant)["previous_root_id"] == first.root_id
     assert adopted.handle({"op": "sign-registry-entry", "root_id": adopted.root_id, "entry": _entry()})["ok"]
+
+
+def test_starting_records_the_root_binding_once_per_root(signer_module, operational_key, authz, consensus, tmp_path):
+    """The agreement events a peer cannot observe are recorded at the moment this
+    node becomes able to observe them: at signer start.
+
+    A genesis formation appends `trust_root_formed`; a chained re-formation
+    appends `trust_root_reformed`; and a restart under a root already recorded
+    appends nothing, so a routine service restart does not grow the chain. The
+    ledger remembering which roots this node has served is the whole mechanism
+    `check_not_reverted` reads, so a term that never signed would leave nothing to
+    detect a later rollback from.
+    """
+    key_path, _ = operational_key
+    genesis = _valid_root(consensus, nonce="root-genesis")
+    ledger = tmp_path / "ledger.json"
+
+    first = signer_module.Signer(MASTER, key_path, genesis, authz, consensus, ledger, clock=lambda: CLOCK)
+    after_first = json.loads(ledger.read_text())["blocks"]
+    assert [block["data"]["event"] for block in after_first] == ["trust_root_formed"]
+    assert after_first[0]["data"]["root_id"] == first.root_id
+
+    # A restart under the same root records nothing further.
+    signer_module.Signer(MASTER, key_path, genesis, authz, consensus, ledger, clock=lambda: CLOCK)
+    assert json.loads(ledger.read_text())["blocks"] == after_first
+
+    # A chained descendant is a re-formation, recorded as such.
+    descendant = _valid_root(consensus, nonce="root-reformed", previous_root_id=first.root_id)
+    adopted = signer_module.Signer(MASTER, key_path, descendant, authz, consensus, ledger, clock=lambda: CLOCK)
+    events = [block["data"]["event"] for block in json.loads(ledger.read_text())["blocks"]]
+    assert events == ["trust_root_formed", "trust_root_reformed"]
+    assert adopted.root_id != first.root_id
 
 
 def test_a_descent_forward_then_a_revert_back_is_still_refused(
@@ -830,7 +863,7 @@ def test_no_vendor_manifest_points_at_the_signer_port():
     """The signer is not on the declared port list, so no deployment will expose it.
 
     Scans the port *declarations*, not the prose. An earlier version scanned the
-    whole serialised document and started failing when port 8080's note explained
+    whole serialised document and started failing when port 8088's note explained
     that authority messages are signed elsewhere and never on the admin page — the
     note reassuring a reader that the signer is unreachable tripped a test whose
     job is to keep the signer unreachable. The distinction that matters is whether
@@ -920,10 +953,14 @@ def test_it_answers_over_a_unix_socket_and_records_to_the_ledger(signer, authz, 
         )
         assert response["ok"], response.get("error")
 
-        # The ledger must now hold a signature_issued block that verifies.
+        # Starting the signer records the root it runs under, so the ledger opens
+        # with trust_root_formed; the registry signature lands on top of it.
         ledger = json.loads((tmp_path / "ledger.json").read_text())
-        assert len(ledger["blocks"]) == 1
-        data = ledger["blocks"][0]["data"]
+        assert [block["data"]["event"] for block in ledger["blocks"]] == [
+            "trust_root_formed",
+            "signature_issued",
+        ]
+        data = ledger["blocks"][-1]["data"]
         assert data["event"] == "signature_issued"
         assert data["operation"] == "sign-registry-entry"
         assert data["root_id"] == signer.root_id
@@ -1064,10 +1101,11 @@ def test_read_line_treats_socket_timeout_as_the_read_deadline(signer_module):
 def test_two_concurrent_requests_serialise_into_one_intact_chain(signer, tmp_path):
     """DoD (3): the single-key invariant survives concurrency.
 
-    Two requests signed back-to-back over the socket land as two signature_issued
-    blocks in total — the signer lock serialises the handle, so no block is lost
-    to a read-modify-write race and order is a strict total order — each chaining
-    to the previous, and the production ledger verifier accepts the result.
+    The ledger opens with the signer's own trust_root_formed block; two requests
+    signed back-to-back over the socket then land as two signature_issued blocks —
+    the signer lock serialises the handle, so no block is lost to a
+    read-modify-write race and order is a strict total order — each chaining to
+    the previous, and the production ledger verifier accepts the result.
     """
     socket_dir = tmp_path / "state" / "signer"
     socket_dir.mkdir(parents=True)
@@ -1102,11 +1140,13 @@ def test_two_concurrent_requests_serialise_into_one_intact_chain(signer, tmp_pat
         ledger = json.loads((tmp_path / "ledger.json").read_text())
         blocks = ledger["blocks"]
         assert [block["data"]["event"] for block in blocks] == [
+            "trust_root_formed",
             "signature_issued",
             "signature_issued",
         ]
         assert blocks[0]["prev_hash"] == ""
         assert blocks[1]["prev_hash"] == blocks[0]["hash"]
+        assert blocks[2]["prev_hash"] == blocks[1]["hash"]
 
         spec = importlib.util.spec_from_file_location(
             "ledger_for_concurrency", ROLE_ROOT / "services" / "sparknet-ledger.py"
@@ -1168,16 +1208,27 @@ def test_two_signatures_chain_on_top_of_each_other(signer, tmp_path, authz, cons
     assert first["ledger_block"] != second["ledger_block"]
 
     ledger = json.loads((tmp_path / "ledger.json").read_text())
-    assert ledger["blocks"][0]["prev_hash"] == ""
-    assert ledger["blocks"][1]["prev_hash"] == ledger["blocks"][0]["hash"]
+    blocks = ledger["blocks"]
+    # The signer's own root binding opens the chain; every later block links to
+    # the one before it, so order — not just content — is what the chain attests.
+    assert [block["data"]["event"] for block in blocks] == [
+        "trust_root_formed",
+        "signature_issued",
+        "signature_issued",
+    ]
+    for previous, block in itertools.pairwise(blocks):
+        assert block["prev_hash"] == previous["hash"]
+    assert blocks[0]["prev_hash"] == ""
 
 
-def test_a_refused_request_writes_nothing_to_the_ledger(signer, tmp_path):
+def test_a_refused_request_appends_nothing_to_the_ledger(signer, tmp_path):
+    # Starting the signer records its root binding, so the ledger already exists;
+    # what a refusal must not do is *append* a block to it. A run of failed
+    # requests would otherwise leave a record of nothing having happened.
+    before = json.loads((tmp_path / "ledger.json").read_text())
     signer.handle({"op": "sign-registry-entry", "root_id": "wrong", "entry": _entry()})
-    assert not (tmp_path / "ledger.json").exists(), (
-        "a refusal must not create a ledger; otherwise a run of failed requests "
-        "would leave a record of nothing having happened"
-    )
+    after = json.loads((tmp_path / "ledger.json").read_text())
+    assert after["blocks"] == before["blocks"]
 
 
 # --- helpers -----------------------------------------------------------------

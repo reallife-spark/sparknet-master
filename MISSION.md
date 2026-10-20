@@ -17,7 +17,7 @@ isolated signer for the operational key, and declares an admin surface and
 |---|---|---|
 | election | 14 (impl) | the trust-root schema exists; no node has voted, so no node is Master |
 | overlay anchoring | 3 | `10.100.0.1` is documented, not bound |
-| admin page deployed | 18 | the surface is declared and configured; nothing binds `10.100.0.1:8080` |
+| admin page deployed | 18 | the surface is declared, configured, and deployed on the live Master at `10.100.0.1:8088` (relocated from 8080, fabric Step 55); on the dev host nothing binds it |
 | registry distribution | 1–4 | peers read an operator-placed registry; nothing pushes one |
 
 So this role can currently generate keys, prove parity, verify a chain, and sign

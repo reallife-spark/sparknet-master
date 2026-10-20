@@ -1,6 +1,6 @@
 ---
 title: alpha-admin — standing rules for this vault
-updated: 2026-10-06
+updated: 2026-10-18
 ---
 
 # alpha-admin — standing rules for this vault
@@ -87,10 +87,15 @@ There is no `approvals.md` and nothing may be coded to one.
 - Key material: the private user key is `$SPARKNET_STATE_DIR/keys/user.ed25519`
   at 0600. `.gitignore` blocks `*.ed25519`, `*.pem`, `*.key`, `privkey*`,
   `id_ed25519*`, `*.seed`; `make keys-check` fails on a tracked match.
-- The **operational** signing key (the one the elected Master would sign
+- The **operational** signing key (the one the elected Master signs
   authorizations with) is a separate concern: `services/sparknet-signer.py`
-  is the only process designed to hold it, and it has **never been deployed**.
-  Do not blur the two keys in prose.
+  is the only process designed to hold it. Its election→signer arc was
+  **proven live on the real pair agx64/agx32 2026-10-07** (signer as
+  `sparknet-master-signer.service`, a signed registry entry verified by a
+  still-peer, reboot survival, a revoke→peer-inert→re-authorize cycle). What
+  is still not built is the admin surface binding (build plan Step 18,
+  `DoD: confirm: user`) and Phase 9's destructive legs. Do not blur the two
+  keys in prose.
 
 ## 6. The Master is the infrastructure administrator — but not yet
 
@@ -100,12 +105,15 @@ infrastructure administration: the **git** repository, **file sharing**,
 role *responsibility*, contracted in `contracts/ports.json` as `spec-only`
 and scoped in [[MASTER_ADMIN_PLAN]].
 
-Nothing here may claim a listener exists: the Master is not elected, no
-signing key is in use, and `contracts/ports.json` marks every admin service
-`spec-only` until real scaffolding lands and a runtime measurement observes
-it. The peer vault's sign-off ("specified, not built") applies here hardest,
-because the difference between "the Master administers git" and "a git daemon
-is running" is exactly the overclaim this charter exists to prevent.
+Nothing here may claim a listener exists: `contracts/ports.json` still marks
+the admin services `spec-only` or `provisioned` — on this host nothing binds
+`10.100.0.1:8088` (relocated from 8080, fabric Step 55; reachability
+`DoD: confirm: user`, build plan Step 18) — until a runtime measurement
+observes it. (The surface *is* deployed on the live Master agx32.) The election itself
+is no longer the gap: it was proven live on agx64/agx32 2026-10-07 (role
+charter). The peer vault's sign-off ("specified, not built") applies here
+hardest, because the difference between "the Master administers git" and
+"a git daemon is running" is exactly the overclaim this charter exists to prevent.
 
 ## 7. Writing discipline
 

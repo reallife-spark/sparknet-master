@@ -13,12 +13,11 @@ The chain rules and the block schema are the peer's, defined once in
 ``peer-node/blockchain/ledger.schema.json`` and not restated here. What this
 service adds is the block *content* for Master-side events.
 
-Currently it can only ``verify`` the chain. There is no ``append`` yet: appending
-requires the signer (Step 17), because election and root events must be signed by
-the operational key rather than written by an unsigned process. An unsigned append
-would let anyone with write access rewrite history, which is precisely what a
-hash chain exists to prevent — so the honest state is "verifies, does not yet
-append".
+This service can **verify** the chain, and only that. Appending lives in the
+signer (`sparknet-signer.py record_event`), because every Master event must be
+signed by the operational key rather than written by an unsigned process: an
+unsigned append would let anyone with write access rewrite the history a hash
+chain exists to prevent. One process writes, and it is the one holding the key.
 """
 
 from __future__ import annotations
@@ -152,10 +151,11 @@ def describe(ledger: dict[str, Any] | None = None) -> dict[str, Any]:
         "detail": detail,
         "can_append": False,
         "can_append_note": (
-            "append is deliberately absent: a block must be signed by the "
-            "operational key, and the signer lands in build plan Step 17. An "
-            "unsigned append would let anyone with write access rewrite the "
-            "history a hash chain exists to protect."
+            "append is deliberately absent from this verifier: a block must be "
+            "signed by the operational key, and only the isolated signer holds it "
+            "(`sparknet-signer.py record_event`). An unsigned append would let "
+            "anyone with write access rewrite the history a hash chain exists to "
+            "protect."
         ),
         "master_only_events": list(MASTER_EVENTS),
     }

@@ -5,9 +5,13 @@
 # nobody can review — which is the wrong property for the one place an injection
 # would do the most damage.
 #
-# NOT DEPLOYED. Open WebUI is not installed on this host and no overlay interface
-# exists, so nothing here binds. What is verified is that the topology is coherent
-# and that the surface carries no signing capability: see
+# DEPLOYED on the Master (agx32) — the container `sparknet-admin-webui` runs with
+# this file's topology and binds `10.100.0.1:8088`. The bind needs the overlay
+# address to exist first: if the Docker daemon starts the container before
+# `sparknet-master-wireguard-anchor.service` has brought `wg1` up, the container
+# dies with `bind: cannot assign requested address` (exit 128). The anchor unit
+# carries `Before=docker.service` for exactly this reason. What is verified
+# structurally is that the surface carries no signing capability: see
 # ../../manifests/admin-surface.json and ../../tests/test_admin_surface.py.
 #
 # The single rule this file exists to enforce: `sign` is not obtainable from
@@ -28,7 +32,11 @@ services:
     # *binding* is the opposite move and does not contradict that: this is about
     # who may reach the page, not what the page may reach.
     ports:
-      - "10.100.0.1:8080:8080"
+      # Overlay host port 8088, not 8080: on the Master host an unrelated
+      # container holds 0.0.0.0:8080, so the overlay bind would fail EADDRINUSE.
+      # The container port is unchanged; only the published overlay port moved
+      # (fabric Step 55, 2026-10-19). contracts/ports.json records 8088.
+      - "10.100.0.1:8088:8080"
     environment:
       # The vault is the only knowledge base. Open WebUI's own vector store would
       # be a second one that no signed entry can revoke, which makes it the quieter

@@ -50,7 +50,7 @@
   },
 
   "page": {
-    "reachable_at": "http://10.100.0.1:8080/",
+    "reachable_at": "http://10.100.0.1:8088/",
     "overlay_only": true,
     "binds_to": "10.100.0.1",
     "never_binds_to": "0.0.0.0",
@@ -60,7 +60,7 @@
         "name": "open-webui",
         "role": "the multi-user chat surface, where the injection risk actually lives",
         "config": "master-node/configs/admin-surface/docker-compose.admin.yml",
-        "bind": "10.100.0.1:8080:8080"
+        "bind": "10.100.0.1:8088:8080"
       },
       {
         "name": "opencode-terminal",
@@ -75,5 +75,5 @@
     }
   },
 
-  "not_built_yet": "This is a declaration, not a deployment. Open WebUI is not installed on this host, no overlay interface exists, and nothing binds 8080. `contracts/ports.json` records the port as `provisioned` with `runtime: not-verifiable-here`, and Step 18's DoD (3) reachability is `DoD: confirm: user`. The isolation assertions in test_admin_surface.py are read off this file and are therefore only as strong as the file — they prove the declared topology is coherent, not that a real deployment held."
+  "not_built_yet": "This is a declaration, not a deployment on the development host. Open WebUI is not installed here, no overlay interface exists, and nothing binds 8088 here. `contracts/ports.json` records the port as `provisioned` with `runtime: not-verifiable-here`, and Step 18's DoD (3) reachability is `DoD: confirm: user`. On the live Master (agx32) the surface is deployed at 10.100.0.1:8088 (relocated from 8080, fabric Step 55). The isolation assertions in test_admin_surface.py are read off this file and are therefore only as strong as the file — they prove the declared topology is coherent, not that a real deployment held."
 }

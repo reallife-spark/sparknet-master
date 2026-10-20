@@ -320,12 +320,11 @@ def _block_hash(block: dict[str, Any], authz: Any) -> str:
     return authz.ledger_block_hash(block)
 
 
-def record_signature(
+def record_event(
     ledger_path: Path,
     node_id: str,
-    operation: str,
-    subject: str,
-    signature_b64: str,
+    event: str,
+    data: dict[str, Any],
     root_id: str,
     *,
     authz: Any,
@@ -333,14 +332,20 @@ def record_signature(
     node_pubkey_b64: str,
     clock=None,
 ) -> dict[str, Any]:
-    """Append one `signature_issued` block whose *header* the node key signs.
+    """Append one Master-side block whose *header* the node key signs.
 
-    `signature_b64` is the operation's own signature (over a registry entry, a
-    job, …) and is recorded inside `data`; the block-level `signature` is a
-    **second** signature by the same key over the whole block header, so the
-    block's position, timestamp and payload are bound to the key rather than
-    restated. Without it, a block could be deleted or reordered and the chain
-    would still verify.
+    The block's `data` is `{"event": event, "node_id": node_id, "root_id": root_id,
+    **data}`: the event, the node that recorded it and the root in force are part
+    of every block, so `check_not_reverted` can read the lineage from any of them
+    and the header signature binds position, timestamp and payload to the key.
+    Without that header signature a block could be deleted or reordered and the
+    chain would still verify.
+
+    `signature_issued` (an operation's own signature recorded inside `data`) rides
+    this same path, and so do the agreement events a peer cannot observe — a trust
+    root being formed or re-formed, an election outcome. All of them are Master
+    events signed by the operational key; none may be written by an unsigned
+    process.
 
     The ledger is written atomically with a 0600 mode. Requests are serialised by
     the signer lock (one lock around `Signer.handle` in the transport), and the
@@ -370,12 +375,10 @@ def record_signature(
         "timestamp": now.isoformat().replace("+00:00", "Z"),
         "node_pubkey_b64": node_pubkey_b64,
         "data": {
-            "event": "signature_issued",
+            "event": event,
             "node_id": node_id,
-            "operation": operation,
-            "subject": subject,
-            "signature_b64": signature_b64,
             "root_id": root_id,
+            **data,
         },
     }
     block["signature"] = authz.sign_bytes(private_key, authz.ledger_block_signable(block))
@@ -436,6 +439,49 @@ class Signer:
         self.root = consensus.canonical_root(root)
         self.root_id = consensus.root_id(root)
         self.signed_count = 0
+
+        # Record the root this term runs under, if the ledger has not already seen
+        # it. The ledger is what remembers which roots this node has served — that
+        # is the whole mechanism `check_not_reverted` reads — so a term that never
+        # signed anything would leave nothing to detect a later rollback from. A
+        # genesis formation appends `trust_root_formed`; a re-formation (a root
+        # whose `previous_root_id` names the ledger's root in force) appends
+        # `trust_root_reformed`. Re-starting under a root already recorded appends
+        # nothing, so a routine restart does not grow the chain.
+        self._record_root_binding()
+
+    def _record_root_binding(self) -> None:
+        recorded = self._roots_in_ledger()
+        if self.root_id in recorded:
+            return
+        previous = self.root.get("previous_root_id", "")
+        reformed = bool(previous) and previous in recorded
+        record_event(
+            self.ledger_path,
+            self.node_id,
+            "trust_root_reformed" if reformed else "trust_root_formed",
+            {
+                "epoch": self.root.get("epoch", 0),
+                "previous_root_id": previous,
+                "master_pubkey": self.root.get("master_pubkey", ""),
+            },
+            self.root_id,
+            authz=self.authz,
+            private_key=self.key,
+            node_pubkey_b64=self.public_key_b64,
+            clock=self.clock,
+        )
+
+    def _roots_in_ledger(self) -> set[str]:
+        """Every `root_id` the ledger already records, from any Master event."""
+        if not self.ledger_path.is_file():
+            return set()
+        try:
+            ledger = json.loads(self.ledger_path.read_text())
+        except json.JSONDecodeError:
+            return set()
+        roots = {block.get("data", {}).get("root_id") for block in ledger.get("blocks", []) if isinstance(block, dict)}
+        return {str(root) for root in roots if root}
 
     # -- operations
 
@@ -622,12 +668,15 @@ class Signer:
 
     def _record(self, op: str, subject: str, signature_b64: str) -> dict[str, Any]:
         self.signed_count += 1
-        return record_signature(
+        return record_event(
             self.ledger_path,
             self.node_id,
-            op,
-            subject,
-            signature_b64,
+            "signature_issued",
+            {
+                "operation": op,
+                "subject": subject,
+                "signature_b64": signature_b64,
+            },
             self.root_id,
             authz=self.authz,
             private_key=self.key,

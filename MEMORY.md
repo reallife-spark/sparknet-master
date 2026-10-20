@@ -30,9 +30,9 @@ Updated: 2026-10-05
   but produces none, so nothing yet makes a node Master. The signer therefore has
   no root to bind to in practice, and refuses to start. A three-node cluster also
   **cannot survive the loss of a member**; see the open question recorded in
-  `contracts/consensus-protocol.md`. The admin page is **declared, not bound** —
-  no Open WebUI install and no overlay interface on this host, so nothing listens
-  on `10.100.0.1:8080` (`DoD: confirm: user`).
+  `contracts/consensus-protocol.md`. The admin page is **declared, and now
+  deployed on the live Master at `10.100.0.1:8088`** (relocated from 8080, fabric
+  Step 55); on this development host nothing binds it (`DoD: confirm: user`).
 
 ## Key Standing Facts
 
@@ -42,7 +42,7 @@ Updated: 2026-10-05
   under `master-node/` fails the build on purpose.
 - **The admin surface carries no signing authority** (Step 18). `sign` sits in
   `explicitly_not_granted`, the opencode terminal config denies the state dir and
-  `signer.sock`, and port 8080 is contracted `provisioned` /
+  `signer.sock`, and port 8088 is contracted `provisioned` /
   `not-verifiable-here`. This is the boundary that lets an LLM-driven
   multi-user surface exist at all, and it is asserted by tests rather than by
   prose. Admin agents are role-scoped in `master-node/.opencode/agents/` — never

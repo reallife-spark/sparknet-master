@@ -287,7 +287,7 @@ def test_the_compose_file_mounts_no_key_and_no_signer_socket():
             f"the admin compose file references {forbidden!r} outside a comment. The "
             f"surface may not mount anything that reaches the operational key."
         )
-    assert "10.100.0.1:8080:8080" in body, "the admin page must bind the overlay address explicitly, not a wildcard"
+    assert "10.100.0.1:8088:8080" in body, "the admin page must bind the overlay address explicitly, not a wildcard"
     assert "0.0.0.0" not in body, (
         "the admin page must never bind a wildcard address; it is reachable only from inside the overlay"
     )
@@ -355,24 +355,24 @@ def test_the_compose_mounts_do_not_reach_the_signing_key():
 
 
 def test_the_admin_port_is_contracted_as_provisioned_not_implemented():
-    """A listener claim must match a listener, so 8080 says `provisioned`.
+    """A listener claim must match a listener, so 8088 says `provisioned`.
 
     The distinction the contract already draws between `implemented` and
     `provisioned` is exactly this: config exists, nothing binds it. Marking it
     `implemented` would put a false claim in the one file both roles read.
     """
     ports = _load(CONTRACTS / "ports.json")["ports"]
-    assert "8080" in ports, "the admin surface has no port in contracts/ports.json"
-    entry = ports["8080"]
+    assert "8088" in ports, "the admin surface has no port in contracts/ports.json"
+    entry = ports["8088"]
     assert entry["implementation_state"] == "provisioned", (
-        f"8080 is marked {entry['implementation_state']!r}. Nothing binds it on any "
+        f"8088 is marked {entry['implementation_state']!r}. Nothing binds it on any "
         f"host, so `implemented` would be a claim about a listener that does not exist."
     )
     assert entry["bound_by"] == "master"
     assert entry["overlay_only"] is True
     assert entry["binds_to"] == "10.100.0.1"
     assert entry["runtime"] == "not-verifiable-here", (
-        "8080 cannot be observed from a host with no overlay interface; recording "
+        "8088 cannot be observed from a host with no overlay interface; recording "
         "it any other way would imply a measurement nobody made"
     )
 

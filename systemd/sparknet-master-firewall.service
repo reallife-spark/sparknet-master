@@ -1,0 +1,32 @@
+# The Master's host firewall (SPARKNET-FW).
+#
+# A Master is a peer that won an election, so it runs the peer's firewall script
+# by path — one implementation, never a copy — and with the same ingress-only
+# scope. This is deliberately NOT a peer egress rule: the peer design pins egress
+# to the Master (10.100.0.1), and adopting that here would blackhole the fabric,
+# so the overlay-wide egress restriction is a peer concern and the Master's
+# egress stays unrestricted. The script only builds the SPARKNET-FW-IN /
+# SPARKNET-FW-FWD chains, so running it here protects the published AI-stack
+# ports without constraining the Master's outbound traffic.
+#
+# The unit calls a generated shim, so it carries no vault path.
+[Unit]
+Description=Sparknet Master host firewall (SPARKNET-FW) — keeps published ports off the public internet
+Documentation=file:///usr/local/libexec/sparknet/sparknet-master-firewall
+After=docker.service network-online.target
+Wants=network-online.target
+# A docker daemon restart recreates DOCKER-USER and can drop the FORWARD rule;
+# PartOf makes that restart re-apply these rules too, not just a full reboot.
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/sparknet/sparknet-master-firewall install
+# install builds AND verifies in one step; this is a second, independent
+# assertion at the unit boundary so the boot log proves the rule is in force.
+ExecStartPost=/usr/local/libexec/sparknet/sparknet-master-firewall verify
+ExecReload=/usr/local/libexec/sparknet/sparknet-master-firewall install
+
+[Install]
+WantedBy=multi-user.target
