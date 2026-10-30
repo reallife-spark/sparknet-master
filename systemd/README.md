@@ -21,5 +21,5 @@ The peer's units (`sparknet-guard-daemon`, `sparknet-wireguard-anchor`,
 `services/sparknet-parity.py`; a second copy would drift.
 
 `sparknet-killswitch.py` is not a unit. It is an operator-invoked, root-gated,
-dry-run-by-default control that disables the units above and installs an
+dry-run-by-default control that disables the units above and installs
 emergency iptables chains; see `docs/killswitch-template.md`.

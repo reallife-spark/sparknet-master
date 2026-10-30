@@ -10,10 +10,11 @@ deliberately does **not** hold the registry.
 |---|---|---|
 | `node-identity.json` | this node's identity: `node_id`, `role`, `wireguard_public_key_b64`, `overlay_ipv4`, `requested_capabilities` | template — `node_id` is `REPLACE_WITH_NODE_ID` |
 | `cluster-trust-root.json` | the root that names the elected Master | fail-closed template — `master_node_id: null`, no signatures |
+| `registry.schema.json` | a **symlink** to `../../contracts/registry-schema.json` | never a copy — `test_registry_schema.py` fails if it becomes one |
 
 `role` is `peer` in the identity manifest, and that is not a placeholder. **A node
 is a peer until it is elected.** Nothing in this directory can make a node Master;
-only a trust root signed by all three members can, and that arrives at runtime.
+only a trust root signed by every member (2 of 2 in a pair, 3 of 3 in a trio) can, and that arrives at runtime.
 
 ## What is not here, and why
 
@@ -41,11 +42,25 @@ sufficient alone:
 Implemented once, in `../../shared/sparknet-authz.py`, and specified once, in
 `../../contracts/identity-schema.json`. Neither is restated here.
 
-## Distribution is not built
+## How distribution works
 
-Nothing pushes a registry to peers yet. Peers read a local copy that an operator
-places; registry distribution is its own build-plan step, and this file will be
-updated when it lands. Until then, treat a peer's registry as operator-supplied.
+Distribution is built. The Master signs a **publication** (the registry, its
+digest and a monotonic sequence; `contracts/registry-publication.json`) and
+pushes it to each peer's guard on `9090`:
+
+```sh
+make registry-publish REGISTRY=manifests/node-authorizations.json OUT=.state/registry
+make registry-deliver PUBLICATION=.state/registry/current.json
+```
+
+`sparknet-registry-deliver.service` + `.timer` retry every 60 s. The acceptance
+rule is shared (`shared/sparknet-registry-install.py`), so the Master and the
+peer cannot disagree: a lower sequence is a rollback and is refused, the exact
+publication already installed is a no-op (`REGISTRY_ALREADY_INSTALLED`), and an
+equal sequence with a different digest is a fork and is refused. The overlay
+anchor (`10.100.0.1`) is skipped because it is the Master itself, not a peer.
+A peer's copy is still operator-visible and verifiable offline, but it is no
+longer operator-supplied.
 
 ## Why the schema is not duplicated here
 
