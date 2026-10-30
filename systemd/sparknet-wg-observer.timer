@@ -1,0 +1,16 @@
+# The one-minute cadence for the root WireGuard observer. The observer keeps a
+# bounded history; it never probes a peer and never notifies an agent.
+#
+# Staged with the service by `make wg-observer-unit`; not enabled.
+
+[Unit]
+Description=Sparknet root WireGuard observer timer (60s)
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=sparknet-wg-observer.service
+
+[Install]
+WantedBy=timers.target

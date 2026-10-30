@@ -1,33 +1,64 @@
+---
+title: sparknet master-node — MISSION
+status: partially-built
+updated: 2026-10-29
+---
+
 # sparknet master-node — MISSION
 
-The **Master role** of the Sparknet fabric: the node that holds signing
+The **Master role** of the sparknet fabric: the node that holds signing
 authority over the overlay.
 
 ## Status
 
-**Running, partially.** Build plan Steps 15–18 landed: this role has `scripts/`,
-`services/` and `systemd/`, loads the peer's services by path, keeps a
-hash-chained ledger, generates its own keys into the state directory, has an
-isolated signer for the operational key, and declares an admin surface and
-`MASTERSPIKE` knowledge manifest.
+**Built, and proven live — with named gaps.** Build plan Steps 15–18 landed: this
+role has `scripts/`, `services/` and `systemd/`, loads the peer's services by
+path, keeps a hash-chained ledger, generates its own keys into the state
+directory, has an isolated signer for the operational key, and declares an admin
+surface and `MASTERSPIKE` knowledge manifest. Steps 2 and 5 followed on
+2026-10-22: the registry has a single stated shape, and `guard-apply` is now
+grantable — the approval envelope is one rule in `../shared/sparknet-authz.py`,
+signed by the isolated signer and accepted by the peer's own guard. Step 6
+followed on 2026-10-23: the registry now travels as a signed **publication** the
+Master pushes to each peer's guard on 9090, so distribution and revocation
+propagation are built rather than specified.
+
+The election→signer→registry arc was **proven live on real hosts on
+2026-10-07**: agx64 and agx32 co-formed a 2/2 cluster trust root, the signer ran
+as `sparknet-master-signer.service` on agx64, signed a live registry entry a
+still-peer verified, survived a real reboot, and demonstrated a live
+revoke→peer-inert→re-authorize cycle. The overlay anchor came up unattended on a
+real reboot of each host on 2026-10-19.
 
 **Not yet running**, each a numbered step rather than an omission:
 
 | Missing | Step | Consequence |
 |---|---|---|
-| election | 14 (impl) | the trust-root schema exists; no node has voted, so no node is Master |
-| overlay anchoring | 3 | `10.100.0.1` is documented, not bound |
-| admin page deployed | 18 | the surface is declared, configured, and deployed on the live Master at `10.100.0.1:8088` (relocated from 8080, fabric Step 55); on the dev host nothing binds it |
-| registry distribution | 1–4 | peers read an operator-placed registry; nothing pushes one |
+| nocturnal live arming | `9` | the scheduler, idle detector and WG observer are built and tested; arming a lease on a real fleet remains operator-confirmed (`DoD: confirm: user`), and the observer service/timer are staged, not enabled |
+| share ratification, evidence repository, review agents | `10`–`12` | the code is complete 2026-10-29: registry-checked + signer-signed ratification, ledger-hashed evidence committed to git, and signed reversible trust transitions recorded in the ledger. The live 4203 listener, peer round trips and telemetry consumption remain `DoD: confirm: user` |
+| admin services (`4220`–`4223`) | `MASTER_ADMIN_PLAN.md` | git, file share, NAT and the vector DB are contracted `spec-only` |
+| the two destructive legs | — | rollback and a replace-Master re-formation are documented and deliberately unexecuted (`../../contracts/deployment-runbook.md`) |
 
-So this role can currently generate keys, prove parity, verify a chain, and sign
-against a *fixture* trust root. It cannot yet grant anything a peer would accept,
-because no real root exists to grant under. `plans/MASTER_BUILD_PLAN.md` is the
-work order for the rest.
+> `8090` is no longer missing: its instant-push purpose was superseded by Step 6's
+> 9090 registry push and retired, and fabric Step 69C re-scoped it into the
+> peer→Master **intake** listener (telemetry evidence), implemented and staged (not
+> enabled). See `plans/MASTER_BUILD_PLAN.md` Step 7.
 
-Two claims in this file are load-bearing and tested: the signer is
-**implemented and unit-tested, never deployed**, and the admin surface carries no
-signing capability. `make validate` checks both.
+`guard-apply` left this list on 2026-10-22 (build plan Step 5): the Master
+mints a canonical approval, the isolated signer signs it, the Master delivers
+it to the peer it names, and the peer's own guard accepts it — proven by a test
+that signs on this side and applies on the peer's guard daemon, loaded by
+path. What that does **not** claim: no approval has been delivered on a real
+overlay, and the protected-file *write* needs euid 0 and `chattr` on a target
+node, so the exercised path ends at the peer's dry-run verification.
+
+On **this** development host none of the fabric runs: there is no cluster, no
+wireguard kernel module, nothing bound. The live claims above are dated claims
+about real hosts; what is verifiable here is the code, the tests, and the
+boundaries. Two claims in this file are load-bearing and tested: the signer is
+**deployed only by election** (it ran live on agx64 on 2026-10-07; it is not a
+service a role install may enable), and the admin surface carries no signing
+capability. `make validate` checks both.
 
 `make validate` checks the boundary claims in this file; `make parity` proves the
 peer-service resolution; `make keys-check` proves no key material is in the vault.
@@ -38,8 +69,9 @@ peer-service resolution; `make keys-check` proves no key material is in the vaul
   Ed25519 signing key and its lifecycle, authoring and revoking the node
   registry, maintaining the overlay at `10.100.0.1` with one stanza per
   authorized peer, issuing signed guard approvals, the cluster KillSwitch, the
-  instant-push listener, the idle-detection scheduler for nocturnal memory
-  pooling, and the **infrastructure administration** the user delegated to the
+  peer-intake listener (telemetry evidence, `8090`), the idle-detection
+  nocturnal batch scheduler (a time-boxed lease over whole-node jobs, never a
+  literal memory pool), and the **infrastructure administration** the user delegated to the
   Master: the fabric's git, file sharing, NAT and vector embeddings database
   (all contracted `spec-only`, `4220`–`4223`; scoped in
   `plans/MASTER_ADMIN_PLAN.md`).

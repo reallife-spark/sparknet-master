@@ -1,11 +1,16 @@
 ---
 title: sparknet TODO
-updated: 2026-10-03
+updated: 2026-10-25
+status: superseded
 ---
 
 # sparknet — Master TODO
 
-Mirrors plan state for humans; `PLAN.md` remains authoritative for the cursor.
+> [!warning] **Superseded and non-authoritative.** This page is a 2026-10-03
+> snapshot; its "Now" item (verify the scaffold) closed long ago. The cursor and
+> work order live in [`MASTER_BUILD_PLAN.md`](MASTER_BUILD_PLAN.md), and
+> [`../MEMORY.md`](../MEMORY.md) mirrors only the standing state. Do not treat
+> the checkboxes below as current.
 
 ## Now
 

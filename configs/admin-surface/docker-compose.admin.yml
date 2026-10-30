@@ -22,7 +22,7 @@ name: sparknet-admin-surface
 
 services:
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:${WEBUI_TAG:-v0.12.2}
     container_name: sparknet-admin-webui
     restart: unless-stopped
     # Bound to the overlay address, never 0.0.0.0.

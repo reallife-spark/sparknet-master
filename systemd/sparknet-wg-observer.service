@@ -1,0 +1,27 @@
+# Root WireGuard observer for the nocturnal scheduler (Step 9C).
+#
+# The unprivileged telemetry pusher cannot read `wg show` on this fleet: the
+# userspace anchor reports Permission denied and sysfs reports zero. This unit
+# is the narrow privilege boundary. It reads only the Master's own view of the
+# overlay, writes one bounded snapshot under /mnt/log, and decides nothing.
+#
+# Staged, not enabled: `make wg-observer-unit` installs the service and timer.
+# Enabling a root timer is an operator decision, and 9G owns live deployment.
+# The service is a oneshot driven by the timer; it has no socket and no loop.
+
+[Unit]
+Description=Sparknet root WireGuard observer (nocturnal scheduler evidence)
+After=network-online.target sparknet-master-wireguard-anchor.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/libexec/sparknet/sparknet-wg-observer --once \
+    --snapshot /mnt/log/sparknet-wg.json
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadWritePaths=/mnt/log

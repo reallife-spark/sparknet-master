@@ -1,0 +1,18 @@
+# Re-delivery schedule for the registry push.
+#
+# The window the DoD asks for is one interval: a revocation published now
+# reaches a peer whose push failed within `OnUnitActiveSec` (plus the peer's
+# retry). 60 s is short enough that revocation is not a manual operation, and
+# long enough that an offline peer is retried rather than hammered.
+[Unit]
+Description=Sparknet registry re-delivery timer (converges peers after a missed push)
+After=network-online.target
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=sparknet-registry-deliver.service
+
+[Install]
+WantedBy=timers.target

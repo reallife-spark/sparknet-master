@@ -21,9 +21,9 @@ for d in "$PWD" "$(dirname "$PWD")"; do
 done
 ```
 
-Then `AGENTS.md`, `MEMORY.md`, today's `sessions/<date>.md`, and
-`blockchain/ledger.json` — the ledger is evidence, so read it rather than trust a
-summary of it.
+Then `AGENTS.md`, `MISSION.md`, `INTENT.md`, `MEMORY.md`, today's
+`sessions/<date>.md`, and `blockchain/ledger.json` — the ledger is evidence, so
+read it rather than trust a summary of it.
 
 ## The order that matters
 

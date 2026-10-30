@@ -34,7 +34,8 @@ for d in "$PWD" "$(dirname "$PWD")"; do
 done
 ```
 
-Then `AGENTS.md`, `MEMORY.md`, today's `sessions/<date>.md`.
+Then `AGENTS.md`, `MISSION.md`, `INTENT.md`, `MEMORY.md`, today's
+`sessions/<date>.md`.
 
 ## How an entry is actually judged
 

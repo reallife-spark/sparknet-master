@@ -35,25 +35,31 @@ for d in "$PWD" "$(dirname "$PWD")"; do
 done
 ```
 
-Then read `AGENTS.md` (the charter — it wins over any other page), `MEMORY.md`,
-today's `sessions/<date>.md`, and `plans/MASTER_BUILD_PLAN.md` for the `current:`
-cursor.
+Then read `AGENTS.md` (the charter — it wins over any other page), `MISSION.md`,
+`INTENT.md`, `MEMORY.md`, today's `sessions/<date>.md`, and
+`plans/MASTER_BUILD_PLAN.md` for the `current:` cursor.
 
 ## What is actually true right now
 
 Say this plainly rather than implying a working fabric:
 
-- **Election is not built.** `../shared/sparknet-consensus.py` *verifies* a trust
-  root; it does not produce one. No node has voted, so no node is Master in
-  practice, whatever a manifest or a directory name suggests.
-- **The signer is implemented and unit-tested, never deployed.** It has run
-  against fixtures, not against a live three-node cluster. There is no signed
-  registry entry and no key that has crossed a process boundary in production.
+- **Election is built and was proven live on real hosts.** The 2026-10-07
+  deployment co-formed a 2/2 root naming **agx64** Master; that root is
+  archived. The current Step 57 pair is reversed: **agx32 is Master**
+  (`sparknet-node-0002`, `10.100.0.1`) and **agx64 is peer**
+  (`sparknet-node-0001`, `10.100.0.2`), root `fa6f4fa5…`.
+- **The signer was deployed live, not merely unit-tested.** It ran as
+  `sparknet-master-signer.service` on the then-Master (agx64), signed a live
+  registry entry a still-peer verified, and survived a real reboot. A role
+  install still does not enable it — only an election does. On the current pair
+  it runs on agx32.
 - **A three-node cluster cannot survive the loss of a member.** The protocol
   requires unanimity at n=3, so the case where re-formation is needed is the case
   where it is impossible. See the open question in
   `../../contracts/consensus-protocol.md` before proposing any recovery plan.
-- **The overlay is documented, not bound.** `10.100.0.1` is an address in config.
+- **The overlay is live on the real hosts** (agx64/agx32), restored unattended
+  after reboot on 2026-10-19. On this development host nothing binds
+  `10.100.0.1`; that is a host limitation, not the fabric's state.
 
 A reader who trusts a capability the fabric does not have will make a worse
 decision than one who knows it is missing. Say which is which.
@@ -73,8 +79,9 @@ decision than one who knows it is missing. Say which is which.
 
 - No secrets. The Master private key is referenced by **path** only, never by
   value, and never copied into a page, a session note or a command line.
-- Offensive-security work is out of scope here: route it to `red`, defensive work
-  to `blue`.
+- The role-local catalog includes offensive-security references, but loading
+  one is not authorization to act. Route operational offensive work to `red`,
+  defensive work to `blue`.
 - Do not claim live verification of anything network-, kernel- or
   privilege-dependent. Those paths are untested on a development host.
 - Do not edit `contracts/` casually. It is the single source of truth for both

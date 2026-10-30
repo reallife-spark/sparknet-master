@@ -1,5 +1,12 @@
 # Sparknet Node Template Planning (2026-10-03)
 
+> [!warning] **Historical planning input, not current hardware or status.**
+> The session below assumed ConnectX-7/RDMA and a 512 GB+ pooled Nocturnal UMA.
+> The deployed `agx64`/`agx32` pair has no RDMA, no shared GPU address space and
+> no ConnectX-7; Nocturnal mode is a batch lease over independent nodes. See
+> [`scenarios-and-boms.md`](scenarios-and-boms.md). The plan phases are retained
+> as provenance.
+
 This document captures the planning session for ingesting the Sparknet Master Architecture & Deployment Summary (Google Doc) and restating the execution plan.
 
 ## Session Inputs
@@ -10,7 +17,7 @@ This document captures the planning session for ingesting the Sparknet Master Ar
 ## Key Architectural Requirements (from Google Doc)
 - EU AI Act Article 14 (Human Oversight): Plan → Permission → Execute workflow
 - Security: KillSwitch (root-restricted), immutable critical paths with signed Master approvals, WG-isolated guard daemon
-- Hardware: ConnectX-7 RoCEv2 DMA-BUF, MTU 9000, dual-tier (Daytime/Nocturnal), WLAN emergency routing with nftables
+- Hardware as proposed in that session: ConnectX-7 RoCEv2 DMA-BUF, MTU 9000, dual-tier (Daytime/Nocturnal), WLAN emergency routing with nftables. The deployed fleet has none of the RDMA/ConnectX-7 hardware; its firewall is iptables.
 - Portable hidden vault: /mnt/knowledge/.sparknet/ (manifests, compose, ledger, state)
 - Hybrid NVFP4 Diffusion, Vault Curator, permissioned Ed25519-signed hash-chained ledger
 - User-space P2P sync: sparknet-sync.sh + systemd --user timer

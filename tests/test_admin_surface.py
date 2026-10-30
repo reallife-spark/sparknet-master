@@ -270,6 +270,14 @@ def test_the_admin_surface_carries_no_signing_capability(surface):
     )
 
 
+def test_the_admin_terminal_loads_the_role_identity_pages():
+    """The operator-facing terminal must see the Master's purpose and contract."""
+    terminal = _load(TERMINAL_CONFIG)
+    assert {"AGENTS.md", "MISSION.md", "INTENT.md"} <= set(terminal["instructions"]), (
+        "the admin terminal config must load AGENTS.md, MISSION.md and INTENT.md"
+    )
+
+
 def test_the_compose_file_mounts_no_key_and_no_signer_socket():
     """Config as committed, because that is what a redeploy actually restores.
 

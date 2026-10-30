@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["AGENTS.md"],
+  "instructions": ["AGENTS.md", "MISSION.md", "INTENT.md"],
   "comment": "Config for the opencode terminal on the Master's admin surface. The terminal is the operator-facing half of the page Open WebUI serves at 10.100.0.1:8088 (relocated from 8080 on deployment, fabric Step 55); it has no listener of its own. The permission block below is the load-bearing part of Step 18: the surface may read and write the vault, and it may not reach a key. That is a structural claim, so it is worth encoding in the config a real session actually loads rather than only in the manifest a test reads.",
   "permission": {
     "edit": {

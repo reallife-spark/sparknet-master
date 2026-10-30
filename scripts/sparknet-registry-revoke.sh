@@ -51,8 +51,10 @@ priv_b64 = Path('${OP_PRIV}').read_text().strip()
 priv = authz.private_key_from_b64(priv_b64)
 cap = []
 now = datetime.now(timezone.utc)
-entry = authz.sign_authorization(identity, priv, cap, ttl_days=365, now=now)
-entry['revoked'] = True
+# `revoked` is inside the signed envelope: setting it after signing (what this
+# script used to do) yields an entry no peer accepts. The implementation takes
+# it as an argument so the signature covers it.
+entry = authz.sign_authorization(identity, priv, cap, ttl_days=365, now=now, revoked=True)
 print(json.dumps(entry, indent=2))
 PYEOF
 "$PY" "$tmp.py" > "$tmp.out"

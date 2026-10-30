@@ -390,6 +390,73 @@ def test_feed_dedupes_a_repeated_record():
     assert len(events) == 1, "an append-only spool re-read must not double an event"
 
 
+def test_trust_feed_surfaces_flagged_status_without_mutating(tmp_path: Path):
+    """70G: the console reads the evidence and holds it for a human."""
+    spool = tmp_path / "telemetry.jsonl"
+    report = {
+        "kind": "status",
+        "peer_fingerprint": "fp-peer-1",
+        "payload": {
+            "node_id": "peer-1",
+            "trust": {
+                "level": "flagged",
+                "retained_flags": ["flagged"],
+                "flagged_shares": [{"share_id": "share-1", "state": "open", "trust": "flagged"}],
+            },
+        },
+        "issued_at": "2026-10-25T12:00:00Z",
+        "source": "10.100.0.7",
+    }
+    spool.write_text(json.dumps(report) + "\n")
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({"authorizations": []}) + "\n")
+    spool_before, registry_before = spool.read_bytes(), registry.read_bytes()
+
+    con = console.Console(
+        master_node_id="master-0001",
+        authz=authz,
+        registry=registry,
+        telemetry_spool=spool,
+    )
+    rows = con.trust_feed()
+    assert len(rows) == 1
+    assert rows[0]["node"] == "peer-1"
+    assert rows[0]["trust_level"] == "flagged"
+    assert rows[0]["retained_flags"] == ["flagged"]
+    assert rows[0]["evidence"][0]["share_id"] == "share-1"
+
+    events = con.feed([])
+    assert [event["event"] for event in events] == ["trust.flagged"]
+    assert spool.read_bytes() == spool_before, "surfacing must not rewrite telemetry evidence"
+    assert registry.read_bytes() == registry_before, "a flag is never auto-remediated in the registry"
+
+
+def test_trust_feed_keeps_the_newest_report_per_peer(tmp_path: Path):
+    """A resolved status supersedes an older flag; the newest belief is the one shown."""
+    spool = tmp_path / "telemetry.jsonl"
+    old = {
+        "kind": "status",
+        "peer_fingerprint": "fp-peer-1",
+        "payload": {
+            "node_id": "peer-1",
+            "trust": {"level": "flagged", "retained_flags": [], "flagged_shares": [{"share_id": "share-1"}]},
+        },
+        "issued_at": "2026-10-25T12:00:00Z",
+    }
+    new = {
+        "kind": "status",
+        "peer_fingerprint": "fp-peer-1",
+        "payload": {
+            "node_id": "peer-1",
+            "trust": {"level": "authenticated", "retained_flags": [], "flagged_shares": []},
+        },
+        "issued_at": "2026-10-25T12:05:00Z",
+    }
+    spool.write_text(json.dumps(old) + "\n" + json.dumps(new) + "\n")
+    con = console.Console(master_node_id="master-0001", authz=authz, registry=None, telemetry_spool=spool)
+    assert con.trust_feed() == []
+
+
 # --- KDE push -----------------------------------------------------------------
 
 

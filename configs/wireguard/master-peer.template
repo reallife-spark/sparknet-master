@@ -38,9 +38,10 @@
 # self-reinstate and the Master cannot corrupt the peer's config.
 #
 # Note the operational consequence, documented in docs/wireguard.md:
-# configs/nftables restricts wlan0 egress to the Master Anchor only, so a
-# revoked node has no remaining WAN path by design (EU AI Act data-sovereignty
-# posture). Revocation is therefore isolation, not a warning.
+# the deployed peer uses iptables SPARKNET-FW chains, not nftables, and does not
+# pin all WLAN egress to the Master. A revoked node keeps its LAN surface but
+# cannot receive a signed instruction over the overlay, so revocation makes it
+# inert for guarded actions: isolation, not a warning.
 
 # --- Connectivity -----------------------------------------------------------
 # 10.100.0.1/32 is the Master. A node's AllowedIPs on the Master side must

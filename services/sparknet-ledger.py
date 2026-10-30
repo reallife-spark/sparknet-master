@@ -70,6 +70,7 @@ MASTER_EVENTS = (
     "trust_level_changed",
     "signature_issued",
     "share_ratified",
+    "share_evidence",
 )
 
 

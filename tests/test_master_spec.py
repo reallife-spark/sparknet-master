@@ -37,12 +37,55 @@ FABRIC_ROOT = VAULT_ROOT.parent
 PLAN = VAULT_ROOT / "plans" / "MASTER_BUILD_PLAN.md"
 AGENTS = VAULT_ROOT / "AGENTS.md"
 MISSION = VAULT_ROOT / "MISSION.md"
+INTENT = VAULT_ROOT / "INTENT.md"
 
 # Directories that make up this role's executable surface.
 EXECUTABLE_DIRS = ("scripts", "services", "systemd")
 
 #: Pages that describe the role and therefore must not describe code that is absent.
 CLAIMING_PAGES = (AGENTS, MISSION, VAULT_ROOT / "docs" / "master-control-plane.md")
+
+#: Every page the role ships under `docs/`. Each must declare its build state.
+DOC_PAGES = tuple(sorted((VAULT_ROOT / "docs").glob("*.md")))
+
+#: The build states a page may declare. Closed on purpose: "partly done" said in
+#: six different spellings cannot be checked by anything, least of all by a reader.
+BUILD_STATUSES = ("built", "partially-built", "unbuilt", "preserved-not-wired")
+
+#: An orchestrator callout. A page that is not built carries one, so a reader
+#: meets the caveat before the prose it caveats.
+CALLOUT = re.compile(r"^>\s*\[!(warning|caution|important|note|info|tip)\]", re.MULTILINE)
+
+
+def frontmatter(path: Path) -> dict[str, str]:
+    """Parse the flat top-level frontmatter of a page.
+
+    Hand-rolled for the same reason the fabric's own helpers are: there is no
+    YAML dependency, and the keys read here (`status`, `title`, `updated`) are
+    flat scalars. A nested block is ignored rather than half-parsed, so a future
+    addition cannot make this lie.
+    """
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        return {}
+    end = text.find("\n---", 4)
+    if end == -1:
+        return {}
+    fields: dict[str, str] = {}
+    for line in text[4:end].splitlines():
+        if not line or line[0].isspace() or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        fields[key.strip()] = value.strip()
+    return fields
+
+
+def open_plan_steps(plan: Path) -> list[int]:
+    """The steps the plan still lists as open."""
+    steps = []
+    for match in re.finditer(r"^- \[ \] \*\*Step (\d+)\*\*", plan.read_text(), re.MULTILINE):
+        steps.append(int(match.group(1)))
+    return steps
 
 
 def test_plan_cursor_exists_and_points_at_a_real_step() -> None:
@@ -137,6 +180,112 @@ def test_charter_does_not_hard_code_a_machine_path() -> None:
         assert "/mnt/knowledge/sparknet" not in text, (
             f"{page.name} hard-codes the vault path — resolve it from .env instead"
         )
+
+
+# --- the spec/impl boundary, made detectable ------------------------------------
+#
+# Build plan Step 2 asked for one thing here: "make the 'specified, not built'
+# status machine-detectable", so that it cannot silently rot into a false claim.
+# Its original DoD (2) — "asserts this subvault declares itself unbuilt" — was
+# true when the step was written and became false the moment the first
+# executable surface landed (Step 15). Asserting it now would assert a lie, so
+# the status is asserted in the direction that still holds: the role *declares*
+# its build state, and the declaration must agree with the tree and the plan.
+
+
+def test_the_intent_page_exists_and_declares_the_role() -> None:
+    """INTENT is the design contract beside MISSION, not a signed note."""
+    fields = frontmatter(INTENT)
+    assert fields.get("role") == "master", "master-node/INTENT.md must declare role: master"
+    assert fields.get("template") == "true", "master-node/INTENT.md must declare template: true"
+    assert fields.get("intent") == "design-contract", "master-node/INTENT.md must declare intent: design-contract"
+
+
+def test_the_role_declares_a_build_status_that_agrees_with_the_tree() -> None:
+    """DoD (2), inverted honestly.
+
+    The declaration lives in one place — `MISSION.md` — and is checked against
+    reality in both directions: a role with code cannot call itself unbuilt,
+    and a role with no code cannot call itself built.
+    """
+    declared = frontmatter(MISSION).get("status")
+    assert declared in BUILD_STATUSES, (
+        f"MISSION.md must declare a status from {list(BUILD_STATUSES)}, found {declared!r}"
+    )
+    has_surface = any((VAULT_ROOT / name).is_dir() for name in EXECUTABLE_DIRS)
+    if has_surface:
+        assert declared != "unbuilt", (
+            "this role has scripts/, services/ and systemd/; declaring it unbuilt is the "
+            "false claim Step 2 was reopened to stop"
+        )
+    else:
+        assert declared == "unbuilt", "this role has no executable surface, so it cannot declare anything but 'unbuilt'"
+
+
+def test_the_declared_status_agrees_with_the_plan() -> None:
+    """A role whose plan still has open steps is not `built`.
+
+    The plan is the work order; the declaration is the summary. When they
+    disagree, the declaration is the one that rots, because nobody re-reads a
+    status line while working through the plan.
+    """
+    declared = frontmatter(MISSION).get("status")
+    assert declared in BUILD_STATUSES
+    still_open = open_plan_steps(PLAN)
+    if still_open:
+        assert declared != "built", (
+            f"the plan still has open steps {still_open}, so the role cannot declare itself built"
+        )
+    else:
+        assert declared == "built", "every step in the plan is closed, so the role must declare itself built"
+
+
+@pytest.mark.parametrize("page", DOC_PAGES, ids=lambda p: p.name)
+def test_every_doc_page_declares_its_build_status(page: Path) -> None:
+    """Each page states, machine-readably, what it describes.
+
+    This is the "specified, not built" status made detectable: a reader — human
+    or agent — can tell from the frontmatter alone whether the page describes
+    something that runs.
+    """
+    declared = frontmatter(page).get("status")
+    assert declared in BUILD_STATUSES, (
+        f"{page.name} must declare a status from {list(BUILD_STATUSES)} in its frontmatter, found {declared!r}"
+    )
+
+
+@pytest.mark.parametrize("page", DOC_PAGES, ids=lambda p: p.name)
+def test_a_doc_page_that_is_not_built_carries_a_marker(page: Path) -> None:
+    """DoD (3): a page that is not built says so where the reader meets it.
+
+    The frontmatter is for machines. The callout is for people: it has to be in
+    the body, above the prose, or it protects nobody.
+    """
+    declared = frontmatter(page).get("status")
+    if declared == "built":
+        pytest.skip(f"{page.name} declares itself built")
+    assert CALLOUT.search(page.read_text()), (
+        f"{page.name} declares status {declared!r} but carries no callout; a page that is "
+        "not built must say so in its body, not only in its frontmatter"
+    )
+
+
+@pytest.mark.parametrize("page", DOC_PAGES, ids=lambda p: p.name)
+def test_a_doc_page_does_not_claim_this_role_has_no_surface(page: Path) -> None:
+    """The stale claim, in the shape it actually took.
+
+    The Master control-plane page said for months that this role "has no
+    `scripts/`, `services/` or `systemd/` directory". Steps 15-16 made that
+    false, and a page that still says it is worse than a page that says
+    nothing.
+    """
+    stale = re.search(
+        r"this role has no `?scripts/`?, `?services/`? or `?systemd/`? directory|"
+        r"nothing on this page is implemented",
+        page.read_text(),
+        re.I,
+    )
+    assert stale is None, f"{page.name} still claims the role has no surface: {stale.group(0)!r}"
 
 
 def test_master_template_is_documentation_only() -> None:

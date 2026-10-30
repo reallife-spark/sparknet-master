@@ -1,0 +1,34 @@
+# Push the Master's signed registry publication to every peer.
+#
+# Delivery is not signing: this unit holds no key and needs no signer socket. It
+# reads <state>/registry/current.json — written by `make registry-publish` — and
+# POSTs it to each peer's guard on 9090. A peer that was offline for the last
+# push is converged by the next tick, which is why the schedule exists at all.
+#
+# `ExecCondition` makes "nothing published yet" a skip rather than a failure: a
+# freshly elected Master with no publication should not report a red unit every
+# minute. A publication that exists but does not reach a peer *does* fail, so
+# the operator sees it in `systemctl status` while the retry loop keeps trying.
+#
+# SPARKNET_STATE_DIR comes from %h/.env, the same contract as the signer unit.
+# There is deliberately no fallback: a delivery aimed at the wrong state dir
+# would read nothing and look successful.
+[Unit]
+Description=Sparknet registry delivery (push signed registry to peers)
+After=network-online.target
+Wants=network-online.target
+# Never deliver a publication the ledger has not verified the context for.
+After=sparknet-master-ledger.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.env
+ExecCondition=/usr/bin/test -f ${SPARKNET_STATE_DIR}/registry/current.json
+ExecStart=/usr/bin/env bash %h/scripts/sparknet-registry-deliver.sh \
+    --publication ${SPARKNET_STATE_DIR}/registry/current.json
+# A failed push is retried by the timer; a unit that restarts itself in a tight
+# loop would hammer unreachable peers.
+Restart=no
+
+# No [Install]: the timer pulls this unit in. Enabling it directly would push on
+# every boot before anything knows whether a publication exists.

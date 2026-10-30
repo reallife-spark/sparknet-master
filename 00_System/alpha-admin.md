@@ -19,7 +19,8 @@ numbered path; the shim exists so the vendored wiki suite and older
 instructions still resolve.
 
 `_staging/` is real, not a shim (it is the skill review queue). `AGENTS.md`,
-`MEMORY.md`, `MISSION.md` and `Makefile` stay at the root on purpose.
+`MISSION.md`, `INTENT.md`, `MEMORY.md` and `Makefile` stay at the root on
+purpose.
 
 ## 2. Where you may write
 
@@ -124,7 +125,7 @@ hardest, because the difference between "the Master administers git" and
   when it was captured; current surfaces must not hard-code host paths.
 - Logs and telemetry → `/mnt/log/`, not the vault. Runtime caches →
   `$OPENCODE_DATA_DIR`.
-- Never claim live verification of WireGuard, nftables, `chattr +i`,
+- Never claim live verification of WireGuard, iptables, `chattr +i`,
   KillSwitch, signer or systemd behaviour: this host has none of them.
 - Cross-role edits are atomic: touching anything peers depend on means
   editing `contracts/` and both roles in the same commit, then

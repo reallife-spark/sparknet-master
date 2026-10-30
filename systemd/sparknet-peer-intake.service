@@ -1,0 +1,47 @@
+# The Master's peer-intake listener (8090) — telemetry evidence and RFI requests.
+#
+# Not enabled by `make units`. It is a peer-facing socket on the authority-plane
+# node, so enabling it is an operator decision, exactly as the signer and reflex
+# broker units are staged rather than enabled. `make peer-intake-unit` stages the
+# file.
+#
+# It binds the Master's overlay address only, and never a wildcard: a body is
+# attributed by the WireGuard-authenticated source address via the Master's signed
+# registry. A telemetry report needs a registered, non-revoked peer holding the
+# `telemetry` capability; an RFI request needs a registered, non-revoked peer and
+# nothing more (asking a question is not reporting evidence).
+#
+# It carries no authority. It records evidence, acknowledges, and queues requests
+# for the composer; nothing here signs, grants, revokes, escalates, widens a
+# permission or approves. See MASTER_OBSERVABILITY_DESIGN.md,
+# RFI_REQUEST_DESIGN.md, contracts/telemetry-schema.json and contracts/rfi-schema.json.
+
+[Unit]
+Description=Sparknet Master peer-intake listener (telemetry + RFI requests, never authority)
+After=network-online.target sparknet-master-wireguard-anchor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.env
+Environment=SPARKNET_TELEMETRY_BIND=10.100.0.1
+Environment=SPARKNET_TELEMETRY_PORT=8090
+Environment=SPARKNET_TELEMETRY_REGISTRY=%h/manifests/node-authorizations.json
+Environment=SPARKNET_TELEMETRY_SPOOL=/mnt/log/sparknet-telemetry.jsonl
+Environment=SPARKNET_RFI_REQUEST_DIR=/mnt/log/sparknet-rfi-requests
+ExecStart=/usr/bin/env python3 %h/services/sparknet-peer-intake.py --serve \
+    --bind ${SPARKNET_TELEMETRY_BIND} \
+    --port ${SPARKNET_TELEMETRY_PORT} \
+    --registry ${SPARKNET_TELEMETRY_REGISTRY} \
+    --spool ${SPARKNET_TELEMETRY_SPOOL} \
+    --request-dir ${SPARKNET_RFI_REQUEST_DIR}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadWritePaths=/mnt/log
+
+[Install]
+WantedBy=multi-user.target

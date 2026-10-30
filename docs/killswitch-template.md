@@ -1,58 +1,115 @@
 ---
-title: Cluster KillSwitch — preserved template
-updated: 2026-10-04
-status: preserved-not-wired
+title: Cluster KillSwitch — implementation and preserved draft
+updated: 2026-10-25
+status: partially-built
 ---
 
-# Cluster KillSwitch — preserved template
+# Cluster KillSwitch — implementation and preserved draft
 
-> **This is not the KillSwitch.** It is the earliest draft of it, kept here so
-> Step 8 of [`../plans/MASTER_BUILD_PLAN.md`](../plans/MASTER_BUILD_PLAN.md) has
-> a concrete starting point instead of writing from nothing.
->
-> It is a **fenced code block, not a file on disk.** That is deliberate: the
-> master role carries no executable surface, and a `.sh` that can be run is a
-> claim the role cannot honour yet. See
-> [`../../peer-node/AGENTS.md`](../../peer-node/AGENTS.md) for why a peer must not
-> be able to invoke this at all.
+The working control is
+[`../services/sparknet-killswitch.py`](../services/sparknet-killswitch.py),
+invoked through [`../scripts/sparknet-killswitch.sh`](../scripts/sparknet-killswitch.sh)
+or `make -C master-node killswitch`. The fenced draft at the bottom is the
+earliest sketch, kept only as provenance; it is not executed.
+
+> [!warning] **Built; dry-run exercised, destructive run not yet performed.**
+> The implementation and its fake-runner tests are complete (Step 8). On
+> 2026-10-26 the current code was deployed to the Master (`agx32`, host
+> `blue-team`) and its dry-run was exercised through both the wrapper and
+> `make -C master-node killswitch`; `wg1`, the signer/anchor/firewall/ledger
+> units and the admin container were unchanged and no emergency chains appeared.
+> The live destructive run — real `systemctl`, `docker`, `ip` and `iptables` on a
+> host with an overlay — is **not** verified. Step 8's live DoD is
+> `DoD: confirm: user`.
 
 ## Scope, and the two switches that are easy to confuse
 
 | | Peer node containment | Cluster KillSwitch (this) |
 |---|---|---|
-| Lives in | `peer-node/scripts/sparknet-node-containment.sh` | the Master (Step 8) |
-| Scope | this node's own anchor | every control plane in the fabric |
+| Lives in | `peer-node/scripts/sparknet-node-containment.sh` | the Master, `master-node/` |
+| Scope | this node's own anchor and local services | every Master-side control plane, plus the overlay |
 | Runs as | root, on the peer | root, on the Master |
-| A peer can run it | yes — it is the peer's own | **never** |
+| A peer can run it | yes — it is the peer's own | **no** — there is no peer copy or Make target |
+| Default | acts on an explicit invocation | **dry-run**; `--force` changes state |
 
 The peer's switch tears down *its own* WireGuard anchor and stops its own
-services. It cannot touch a sibling. The cluster KillSwitch is a Master-side
-action: it halts the fabric's control planes and drops policy across the whole
-deployment.
+services. The cluster KillSwitch is Master-side: it stops the Master's control
+planes, removes the overlay transport, and installs an emergency drop policy.
+It does not SSH to peers. A peer left running locally can no longer receive a
+signed instruction, so it is inert for guarded actions — the isolation a
+revocation produces, applied to the whole fabric at once.
 
-## What the draft did, and what it did not
+## What the implementation does
 
-The draft below is honest about its own state, which is the main reason it is
-worth keeping:
+Both modes require `EUID 0`; `--help` is the only action that does not. The
+overlay interface is read from `SPARKNET_WG_INTERFACE` and never guessed.
 
-- It **root-gates** correctly — `EUID 0` or it exits. That part is right and
-  should survive into Step 8 unchanged.
-- It **logs a five-step teardown and then does nothing.** Every step is a
-  `log "INFO"` line. There is no `systemctl stop`, no `wg-quick down`, no
-  `nft` rule. `--force` is accepted and still only logs.
-- It was therefore **safe to ship and useless in practice**: it looked like a
-  containment control while containing nothing. Step 8 must close that gap, and
-  its DoD requires the real actions.
+`--force` runs this ordered sequence. Failures do not short-circuit: the report
+collects them so a missing signer unit cannot prevent the overlay from coming
+down. An optional target that reports itself absent is recorded as `absent`,
+not as a containment failure; any other non-zero exit is a real failure and the
+run exits non-zero.
 
-Two defects to fix rather than inherit:
+1. `systemctl disable --now` each control unit:
+   `sparknet-master-signer.service`, `sparknet-peer-intake.service`,
+   `sparknet-reflex-broker.service`, `sparknet-registry-deliver.timer`,
+   `sparknet-registry-deliver.service`.
+2. `systemctl disable --now sparknet-master-wireguard-anchor.service` so a
+   reboot cannot silently restore the authority path.
+3. `docker update --restart=no sparknet-admin-webui`, then
+   `docker stop sparknet-admin-webui` — stop the LLM-driven admin surface and
+   remove its restart policy.
+4. `ip link del <interface>` — remove the overlay.
+5. Remove any earlier `SPARKNET_EMERG_IN/OUT/FWD` jumps, then create the three
+   private iptables chains and insert one jump from `INPUT`, `OUTPUT` and
+   `FORWARD`.
 
-1. **It sourced `../scripts/sparknet-env.sh`**, a pre-split path. The environment
-   is now `scripts/sparknet-env-init.sh` plus `.env`.
-2. **`$(id -u)` is printed twice** in the same log line, labelled `EUID=` and
-   `UID=`. Cosmetic, but it is the kind of thing that makes a reader doubt the
-   root-gate is real.
+The host ruleset is deliberately **not** flushed. The chains add explicit drops
+and leave the built-in policies and Docker's rules intact: input/output on the
+overlay interface, non-loopback TCP to the Master control ports (`8081, 8088,
+8090, 4203, 4210, 4220–4224, 9090`), UDP `51820`, and all forwarded traffic. An
+operator's SSH session survives. The deployed Masters run the legacy iptables
+toolchain (the fabric's firewall is iptables); `nft` is not installed there, so
+the implementation does not depend on it.
 
-## Preserved draft
+## Recovery
+
+Recovery is a deliberate operator action, not an inverse flag:
+
+1. Remove the jumps: `iptables -D INPUT -j SPARKNET_EMERG_IN`,
+   `iptables -D OUTPUT -j SPARKNET_EMERG_OUT`,
+   `iptables -D FORWARD -j SPARKNET_EMERG_FWD`; then `iptables -F` and `-X`
+   each of `SPARKNET_EMERG_IN`, `SPARKNET_EMERG_OUT`, `SPARKNET_EMERG_FWD`.
+2. Bring the overlay back first:
+   `systemctl enable --now sparknet-master-wireguard-anchor.service`; verify
+   `ip link show wg1` and a peer handshake before starting anything that binds
+   `10.100.0.1`.
+3. Restore the admin container exactly as it was:
+   `docker update --restart=unless-stopped sparknet-admin-webui` and
+   `docker start sparknet-admin-webui`; verify `Up (healthy)` on
+   `10.100.0.1:8088`.
+4. Re-enable **only** the control units that were enabled/active in the
+   baseline. Typically `sparknet-registry-deliver.timer` and
+   `sparknet-registry-deliver.service`, then `sparknet-master-signer.service`.
+   Re-enable `sparknet-peer-intake.service` or
+   `sparknet-reflex-broker.service` only if the baseline shows them active; both
+   are staged/not-enabled by default.
+5. Verify the signed registry, ledger chain and peer `authz-verify`, and the
+   admin HTTP endpoint before declaring recovery.
+
+The KillSwitch never restarts a unit on failure; a partial run stays contained
+until an operator performs the steps above.
+
+`docs/master-control-plane.md` and `master-node/AGENTS.md` carry the same
+scope. `master-node/tests/test_killswitch.py` proves the sequence, the absent
+vs. failure distinction, the no-flush policy, and that the peer has no
+`killswitch` target.
+
+## Preserved earliest draft
+
+Kept for provenance. It logs five steps and performs none of them; its
+`sparknet-env.sh` path is pre-split and its `EUID`/`UID` are the same value
+printed twice. Do not run it.
 
 ```bash
 #!/usr/bin/env bash
@@ -126,10 +183,3 @@ log "INFO" "Executing teardown (template mode)"
 log "INFO" "sparknet-killswitch completed"
 exit 0
 ```
-
-## Step 8 DoD, unchanged
-
-`EUID 0`; halts the fabric control planes and drops nftables policy; documented as
-cluster-wide and explicitly distinct from the peer node-containment switch; and
-not invocable by a peer at all. The draft satisfies only the first, and satisfies
-the third only by existing — which is why it is a document and not a script.

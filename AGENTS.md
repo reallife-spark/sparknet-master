@@ -18,7 +18,10 @@ authority over the overlay.
 > `sparknet-master-signer.service` on agx64 — it answered its own root-id,
 > signed a live registry entry a still-peer verified, survived a real reboot,
 > refused non-Master keys/unnamed nodes/tampered roots, and demonstrated a
-> live revoke→peer-inert→re-authorize cycle.
+> live revoke→peer-inert→re-authorize cycle. That 2026-10-07 root is archived;
+> the **current** Step 57 pair is reversed — `agx32` Master
+> (`sparknet-node-0002`, `10.100.0.1`) and `agx64` peer (`0001`,
+> `10.100.0.2`), root `fa6f4fa5…`.
 >
 > The admin surface is **deployed on the live Master (agx32)**: the container
 > `sparknet-admin-webui` runs the committed topology and binds `10.100.0.1:8088`
@@ -65,6 +68,19 @@ path instead of carrying its own versions.
 
 The peer role lives in `../peer-node/` and is implemented.
 
+## The manual
+
+[`USER_MANUAL.md`](USER_MANUAL.md) is the developer-facing manual for this
+role: the election arc, the three keys, the isolated signer and its socket,
+the ledger, the admin surface and its boundary, the vault, the gate, and how
+to make a change correctly. It is published at the root of the
+`sparknet-master` repository.
+
+The **master manual** for the whole system lives in the `sparknet` repository
+as `USER_MANUAL.md`; the contract and the shared implementation this role obeys
+are named in prose there, because the published `sparknet-master` repository
+carries this role and not the contract.
+
 ## Authority, precisely
 
 | Capability | Mechanism |
@@ -73,7 +89,7 @@ The peer role lives in `../peer-node/` and is implemented.
 | Revoke a node | signs `revoked: true`, removes the peer from its own `wg0` |
 | Register a new peer | adds a `[Peer]` stanza to the Master's `wg0` |
 | Authorize a `guard-apply` | signs an approval payload for one specific peer |
-| Halt the fabric | the cluster KillSwitch (specified, still unbuilt) |
+| Halt the fabric | the cluster KillSwitch (built Step 8; dry-run by default, live destructive run unverified) |
 
 None of these are granted through the capability system. The capability
 vocabulary in `../contracts/capabilities.json` governs what a **peer** may do.
@@ -171,8 +187,10 @@ split is the security model rather than a detail — see `security/key-managemen
   blockers. Replace, never append indefinitely.
 - `sessions/YYYY-MM-DD.md` — that session's full record. One file per day;
   sessions spanning midnight use the start date.
-- Read `MEMORY.md` and today's session file at session start; write detail only
-  to today's session file. Never back-write history into `MEMORY.md`.
+- Read `AGENTS.md`, `MISSION.md` and `INTENT.md` at session start: the charter,
+  the role's purpose and the design contract behind it. Then read `MEMORY.md`
+  and today's session file; write detail only to today's session file. Never
+  back-write history into `MEMORY.md`.
 
 ## Plan Protocol
 
@@ -223,6 +241,30 @@ Run `/wiki-status` first, then `/wiki-ingest`, `/wiki-query`, `/wiki-lint`,
 `/wiki-capture`, `/wiki-synthesize`, `/wiki-digest`, `/wiki-rebuild`,
 `/daily-update`.
 
+### Role-local sellable catalog
+
+`master-node/.opencode/skills/` holds every unique skill whose license permits
+commercial redistribution, plus the original dual MIT/Apache `skill-template`.
+It is **sellable by construction**: MIT, Apache-2.0, BSD, ISC, CC0/Unlicense
+and original dual MIT/Apache only. The restricted names (`docx`, `pdf`, `pptx`,
+`xlsx`, `powerpoint`, `kimi-*`, `doc-coauthoring`, `verify`, the bundled
+`claude-api`, `malware-analysis-static`, `template`) are excluded, as are
+GPL/AGPL, CC BY-SA, modified-Apache and unclear licenses.
+
+`claude-api` is retained only from its Apache-2.0 source and is marked
+`tier: optional`, `standard: false`; it is not in the peer set and is not a
+default skill. Counts, licenses, source paths and hashes are in
+`.opencode/skills/.inventory.json`. Refresh with `make skills-sync`; verify
+with `make skills-check`.
+
+## Templates
+
+| Template | Purpose |
+| --- | --- |
+| `deployment/vault-template/` | Starter `00_System/` set for a fresh vault (`cp` + `make user-init`). |
+| `configs/wireguard/master-peer.template` | Master-side WireGuard peer stanza for `wg0`. |
+| `docs/killswitch-template.md` | Cluster KillSwitch implementation, recovery, and preserved draft. |
+
 ## Boundaries
 
 - **Scope discipline.** This vault holds Master-role sparknet knowledge.
@@ -231,16 +273,19 @@ Run `/wiki-status` first, then `/wiki-ingest`, `/wiki-query`, `/wiki-lint`,
 - **No secrets.** Never commit tokens, keys or `.env` contents. Reference the
   secret *path* only. The Master private key is the most sensitive secret in
   the entire fabric.
-- **Offensive security is out of scope** for a general/default agent session.
-  Route offensive work to the `red` role and defensive work to `blue`.
+- **The catalog is reference, not authorization.** The role-local catalog
+  includes the Apache-2.0 cyber corpus, including offensive-security material.
+  Loading a skill does not authorize an operation; operational offensive work
+  still routes to `red`, defensive work to `blue`.
 - Cite sources. A distilled page without provenance is a guess — mark it as one.
-- **Do not claim production verification.** The code on this role is real and
-  tested, and the election→signer→registry arc has run in a live **local**
-  three-node rehearsal (Step 12). It has not run **in production**: no deployed
-  election, no deployed signed registry entry, no key crossing a process boundary
-  on real nodes. The peer's live network
-  behaviour is likewise unverified on the development host. Say "implemented and
-  unit-tested", never "deployed" or "verified in production".
+- **Do not overclaim what the live run proves.** The code on this role is real
+  and tested, and the election→signer→registry arc was **deployed and proven
+  live on real hosts on 2026-10-07** (agx64/agx32): a signed registry entry, a
+  key crossing a process boundary, a reboot, and a revoke/restore cycle. That is
+  a dated claim about those hosts, not a general production-fleet guarantee. On
+  the development host nothing binds the overlay or admin surface. Say
+  "implemented and tested", "deployed live on agx64/agx32 on 2026-10-07", or
+  "unverified here" — never generalise the live run into an untested claim.
 - **Distinguish what runs from what is specified.** This role now runs a real
   surface, so the temptation reverses: describing the signer, election or overlay
   anchoring as working when they are specified-only. Check the boundary before

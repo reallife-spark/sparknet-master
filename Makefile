@@ -30,11 +30,16 @@ VENV_PY := $(VAULT_ROOT)/.venv/bin/python
 FABRIC_VENV_PY := $(FABRIC_ROOT)/.venv/bin/python
 PY := $(if $(wildcard $(VENV_PY)),$(VENV_PY),$(if $(wildcard $(FABRIC_VENV_PY)),$(FABRIC_VENV_PY),python3))
 
+EVENT ?= -
+TRUST_NODE ?=
+LEVEL ?=
+REASON ?=
+
 .PHONY: help env-init validate status plan test test-all lint spec-check \
-        env-show parity ledger keygen keys-check units units-check \
-        signer signer-unit console \
+        env-show parity ledger evidence-capture review-agents keygen keys-check units units-check \
+        signer signer-unit reflex-unit peer-intake-unit wg-observer-unit console \
         provenance-verify user-init provenance-append ingest precommit shims-check \
-        bundle wiki-preflight wiki-status wiki-lint wiki-query clean
+        bundle wiki-preflight wiki-status wiki-lint wiki-query skills-sync skills-check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -47,7 +52,7 @@ env-show: ## Print the paths this role resolves (vault, peer node, state dir)
 	@"$(VAULT_ROOT)/scripts/sparknet-master-env.sh"
 
 validate: ## Charter, plan, executables wired, and parity with the peer
-	@for f in AGENTS.md MEMORY.md MISSION.md plans/MASTER_BUILD_PLAN.md \
+	@for f in AGENTS.md MEMORY.md MISSION.md INTENT.md plans/MASTER_BUILD_PLAN.md \
 	          configs/wireguard/master-peer.template security/key-management.md; do \
 		  [ -f "$(VAULT_ROOT)/$$f" ] || { echo "missing $$f" >&2; exit 1; }; \
 	done
@@ -86,6 +91,13 @@ parity: ## Prove this role runs the PEER's own service files, not copies
 ledger: ## Verify the master's hash-chained ledger
 	@$(PY) "$(VAULT_ROOT)/services/sparknet-ledger.py" verify
 
+evidence-capture: ## Capture one evidence event from EVENT (JSON file, - for stdin)
+	@$(PY) "$(VAULT_ROOT)/services/sparknet-evidence-capture.py" --event "$(EVENT)"
+
+review-agents: ## Review EVENT, or emit a trust transition (TRUST_NODE= LEVEL= REASON=)
+	@$(PY) "$(VAULT_ROOT)/services/sparknet-review-agents.py" --event "$(EVENT)" \
+		$(if $(TRUST_NODE),--trust-node "$(TRUST_NODE)" --level "$(LEVEL)" --reason "$(REASON)",)
+
 # Units are named explicitly rather than globbed, so that adding a unit file is a
 # deliberate act: a new unit that nobody enables is a file that looks like
 # functionality and is not, which is exactly what the wiring test hunts for.
@@ -99,6 +111,24 @@ ledger: ## Verify the master's hash-chained ledger
 UNITS := sparknet-master-parity.service sparknet-master-ledger.service \
          sparknet-master-wireguard-anchor.service sparknet-master-firewall.service
 SIGNER_UNIT := sparknet-master-signer.service
+# The reflex broker is opt-in (local-only is the default) and needs a credential
+# provisioned in Step 64F, so it is staged, not enabled. units-check still sees
+# it here, which is what keeps the unit from being forgotten.
+REFLEX_UNIT := sparknet-reflex-broker.service
+# The peer-intake listener (8090, re-scoped by fabric Step 69C) is staged, not
+# enabled, like the signer and reflex broker: a peer-facing socket on the
+# authority-plane node is an operator's decision to bring up.
+PEER_INTAKE_UNIT := sparknet-peer-intake.service
+# The root WireGuard observer is staged with its timer, not enabled: a root
+# one-minute timer is an operator decision and Step 9G owns the live window.
+WG_OBSERVER_UNITS := sparknet-wg-observer.service sparknet-wg-observer.timer
+WG_OBSERVER_SHIM := $(SHIM_DIR)/sparknet-wg-observer
+# The delivery service must NOT be enabled with --now: its first run would push
+# to whatever peers exist at install time, and a single unreachable peer (a
+# normal condition) would make `make units` fail. The timer owns the schedule;
+# the service is pulled in by it.
+REGISTRY_UNITS := sparknet-registry-deliver.service sparknet-registry-deliver.timer
+REGISTRY_TIMER := sparknet-registry-deliver.timer
 UNIT_DIR ?= /etc/systemd/system
 # The overlay anchor and the firewall run as root and need a stable absolute path
 # to the vault, so they are launched through generated shims (same convention as
@@ -113,7 +143,7 @@ FIREWALL_SCRIPT := $(PEER_NODE_DIR)/scripts/sparknet-firewall.sh
 FIREWALL_SHIM := $(SHIM_DIR)/sparknet-master-firewall
 
 units: ## Install + enable this role's units (needs root; set UNIT_DIR to stage only)
-	@for u in $(UNITS); do \
+	@for u in $(UNITS) $(REGISTRY_UNITS); do \
 	  install -Dm644 "$(VAULT_ROOT)/systemd/$$u" "$(UNIT_DIR)/$$u" || exit 1; \
 	done
 	@echo "  ✓ staged $(UNITS) into $(UNIT_DIR)"
@@ -133,7 +163,8 @@ units: ## Install + enable this role's units (needs root; set UNIT_DIR to stage 
 	  } > "$(FIREWALL_SHIM)"; \
 	  chmod +x "$(FIREWALL_SHIM)"; \
 	  echo "  ✓ wrote $(FIREWALL_SHIM)"; \
-	  systemctl daemon-reload && systemctl enable --now $(UNITS); \
+	  systemctl daemon-reload && systemctl enable --now $(UNITS) && \
+	  systemctl enable --now $(REGISTRY_TIMER); \
 	else \
 	  echo "  (UNIT_DIR overridden — not touching systemd)"; \
 	fi
@@ -151,9 +182,34 @@ signer: ## Print the signer's isolation posture (no key, no root, no socket)
 
 signer-unit: ## Stage the signer unit ONLY (does not enable it; election does that)
 	@install -Dm644 "$(VAULT_ROOT)/systemd/$(SIGNER_UNIT)" "$(UNIT_DIR)/$(SIGNER_UNIT)"
+
+reflex-unit: ## Stage the reflex broker unit ONLY (does not enable it; 64F does)
+	@install -Dm644 "$(VAULT_ROOT)/systemd/$(REFLEX_UNIT)" "$(UNIT_DIR)/$(REFLEX_UNIT)"
 	@echo "  ✓ staged $(SIGNER_UNIT) into $(UNIT_DIR) — not enabled."
 	@echo "    It will refuse to start until SPARKNET_NODE_ID and"
 	@echo "    \$$SPARKNET_STATE_DIR/trust-root.json name this node as Master."
+
+peer-intake-unit: ## Stage the peer-intake (8090) unit ONLY (does not enable it)
+	@install -Dm644 "$(VAULT_ROOT)/systemd/$(PEER_INTAKE_UNIT)" "$(UNIT_DIR)/$(PEER_INTAKE_UNIT)"
+	@echo "  ✓ staged $(PEER_INTAKE_UNIT) into $(UNIT_DIR) — not enabled."
+	@echo "    It binds 10.100.0.1:8090 and refuses a non-overlay bind; enabling a"
+	@echo "    peer-facing socket on the authority-plane node is an operator decision."
+
+wg-observer-unit: ## Stage the root WG observer + timer ONLY (does not enable them)
+	@for u in $(WG_OBSERVER_UNITS); do \
+	  install -Dm644 "$(VAULT_ROOT)/systemd/$$u" "$(UNIT_DIR)/$$u" || exit 1; \
+	done
+	@if [ "$(UNIT_DIR)" = "/etc/systemd/system" ]; then \
+	  install -d "$(SHIM_DIR)"; \
+	  { echo '#!/bin/sh'; \
+	    echo '# Generated by master-node/Makefile — do not edit.'; \
+	    printf 'exec %s "$@"\n' '$(VAULT_ROOT)/services/sparknet-wg-observer.py'; \
+	  } > "$(WG_OBSERVER_SHIM)"; \
+	  chmod +x "$(WG_OBSERVER_SHIM)"; \
+	  echo "  ✓ wrote $(WG_OBSERVER_SHIM)"; \
+	fi
+	@echo "  ✓ staged $(WG_OBSERVER_UNITS) into $(UNIT_DIR) — not enabled."
+	@echo "    The observer runs as root, reads wg1/wg0, and writes /mnt/log/sparknet-wg.json."
 
 # The console is the operator's seat: it composes an admin request, asks the
 # isolated signer for a signature, and posts it to a peer's /admin/ route. It is
@@ -269,7 +325,7 @@ ingest: ## Land STDIN or SRC= as an unsigned note in 01_Inbox/ (SOURCE=master-no
 shims-check: ## Prove every legacy name is a symlink to its numbered home
 	@$(PROV_PY) $(PROV) $(PROV_VAULT) shims
 
-precommit: keys-check ## keys-check + secret scan + provenance-verify --strict
+precommit: keys-check skills-check ## keys-check + skill manifest + secret scan + provenance-verify --strict
 	@$(PROV_PY) $(PROV) $(PROV_VAULT) scan
 	@$(PROV_PY) $(PROV) $(PROV_VAULT) verify --strict
 	@echo "precommit: clean"
@@ -290,6 +346,12 @@ wiki-lint: ## Preflight, then /wiki-lint on this role's vault
 wiki-query: ## Preflight, then /wiki-query against this role's vault
 	@source "$(FABRIC_ROOT)/scripts/sparknet-wiki-env.sh"
 	@echo "Run /wiki-query in opencode, e.g. /wiki-query how does revocation work"
+
+skills-sync: ## Rebuild this role's local skill catalog
+	@$(PY) $(FABRIC_ROOT)/scripts/sync-role-skills.py --apply --role master
+
+skills-check: ## Verify this role's skill catalog, licenses and manifest
+	@$(PY) $(FABRIC_ROOT)/scripts/sync-role-skills.py --check --role master
 
 clean: ## Remove caches
 	@find "$(VAULT_ROOT)" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
@@ -327,46 +389,94 @@ wg-render-master: ## Render Master wg0 from registry (needs REGISTRY, optional O
 	  $$(test -n "$(OUT)" && echo --out "$(OUT)")
 
 # --- Step 5: guard approval ---
-.PHONY: approval-issue approval-deliver
+.PHONY: approval-issue approval-deliver approval-sign-socket
 
-approval-issue: ## Issue signed approval (needs TARGET, CONTENT, optional OUT)
+approval-issue: ## Issue signed approval (needs TARGET, CONTENT, PEER_FINGERPRINT or IDENTITY; optional TTL_SECONDS, OUT)
 	@test -n "$(TARGET)" || (echo "TARGET=<path> required" >&2; exit 1)
 	@test -n "$(CONTENT)" || (echo "CONTENT=<file> required" >&2; exit 1)
+	@test -n "$(PEER_FINGERPRINT)$(IDENTITY)" || (echo "PEER_FINGERPRINT=<fp> or IDENTITY=<identity.json> required" >&2; exit 1)
 	@$(ROLE_ROOT)/scripts/sparknet-approval-issue.sh --target "$(TARGET)" --content "$(CONTENT)" \
+	  $$(test -n "$(PEER_FINGERPRINT)" && echo --peer-fingerprint "$(PEER_FINGERPRINT)") \
+	  $$(test -n "$(IDENTITY)" && echo --identity "$(IDENTITY)") \
+	  $$(test -n "$(TTL_SECONDS)" && echo --ttl-seconds "$(TTL_SECONDS)") \
 	  $$(test -n "$(OUT)" && echo --out "$(OUT)")
 
-approval-deliver: ## Deliver approval (needs FINGERPRINT, optional PAYLOAD, URL, OUT)
+approval-deliver: ## Deliver approval to a peer (needs FINGERPRINT, APPROVAL; optional REGISTRY, URL, OUT)
 	@test -n "$(FINGERPRINT)" || (echo "FINGERPRINT=<fp> required" >&2; exit 1)
+	@test -n "$(APPROVAL)" || (echo "APPROVAL=<approval.json> required" >&2; exit 1)
 	@$(ROLE_ROOT)/scripts/sparknet-approval-deliver.sh --fingerprint "$(FINGERPRINT)" \
-	  $$(test -n "$(PAYLOAD)" && echo --payload "$(PAYLOAD)") \
+	  --approval "$(APPROVAL)" \
+	  $$(test -n "$(REGISTRY)" && echo --registry "$(REGISTRY)") \
 	  $$(test -n "$(URL)" && echo --url "$(URL)") \
 	  $$(test -n "$(OUT)" && echo --out "$(OUT)")
 
+approval-sign-socket: ## Sign an approval THROUGH the isolated signer (needs APPROVAL, optional OUT)
+	@test -n "$(APPROVAL)" || (echo "APPROVAL=<approval.json> required" >&2; exit 1)
+	@$(ROLE_ROOT)/scripts/sparknet-approval-sign-socket.sh --approval "$(APPROVAL)" \
+	  $$(test -n "$(OUT)" && echo --out "$(OUT)")
+
 # --- Step 6: registry distribution ---
-.PHONY: registry-publish
+.PHONY: registry-publish registry-deliver
 
-registry-publish: ## Publish registry to OUT (needs REGISTRY, OUT)
+# Sign+emit the publication the peers install. `--out` holds `current.json`;
+# the sequence makes an older publication refuse at every peer, so a re-run
+# cannot roll a peer back.
+registry-publish: ## Publish registry to OUT (needs REGISTRY, optional OUT/SEQUENCE/OFFLINE)
 	@test -n "$(REGISTRY)" || (echo "REGISTRY=<registry.json> required" >&2; exit 1)
-	@test -n "$(OUT)" || (echo "OUT=<dest> required" >&2; exit 1)
-	@$(ROLE_ROOT)/scripts/sparknet-registry-publish.sh --registry "$(REGISTRY)" --out "$(OUT)"
+	@$(ROLE_ROOT)/scripts/sparknet-registry-publish.sh --registry "$(REGISTRY)" \
+	  $(if $(OUT),--out "$(OUT)") \
+	  $(if $(SEQUENCE),--sequence "$(SEQUENCE)") \
+	  $(if $(OFFLINE),--offline)
 
-# --- Step 7: listener target stub ---
-.PHONY: registry-listen
+# Push the *already signed* publication to every peer's guard. No key is needed
+# here: delivery is not signing, and a peer that missed an earlier push is
+# converged by re-running this (or by the timer installed by `make units`).
+registry-deliver: ## Push a published registry to peers (needs PUBLICATION; optional PEER/TIMEOUT)
+	@test -n "$(PUBLICATION)" || (echo "PUBLICATION=<current.json> required" >&2; exit 1)
+	@$(ROLE_ROOT)/scripts/sparknet-registry-deliver.sh --publication "$(PUBLICATION)" \
+	  $(if $(PEER),--peer "$(PEER)") \
+	  $(if $(TIMEOUT),--timeout "$(TIMEOUT)")
 
-registry-listen: ## Registry push listener (stub)
-	@$(PY) $(VAULT_ROOT)/services/sparknet-registry-listener.py
+# --- fabric Step 67D: RFI answer intake ---
+.PHONY: rfi-answer
+
+# Compose, sign and deliver one RFI answer into a peer's 01_Inbox (the Master half
+# of contracts/rfi-schema.json). Signing goes through the isolated signer by
+# default; OFFLINE=1 signs with the operational key in-process (tests, or a host
+# with no signer running). The peer installs it on POST /api/v1/rfi (guard, 9090).
+rfi-answer: ## Sign+deliver an RFI answer (needs REQUEST_ID, PEER, ITEM_NAME, and CONTENT or EMPTY)
+	@test -n "$(REQUEST_ID)" || (echo "REQUEST_ID=<id> required" >&2; exit 1)
+	@test -n "$(PEER)" || (echo "PEER=<fingerprint> required" >&2; exit 1)
+	@test -n "$(ITEM_NAME)" || (echo "ITEM_NAME=<name> required" >&2; exit 1)
+	@$(ROLE_ROOT)/scripts/sparknet-rfi-answer.sh --request-id "$(REQUEST_ID)" \
+	  --peer "$(PEER)" --item-name "$(ITEM_NAME)" \
+	  $(if $(CONTENT),--content "$(CONTENT)") \
+	  $(if $(EMPTY),--empty) \
+	  $(if $(URL),--url "$(URL)") \
+	  $(if $(REGISTRY),--registry "$(REGISTRY)") \
+	  $(if $(OFFLINE),--offline) \
+	  $(if $(OUT),--out "$(OUT)")
+
+# --- Step 7: 8090 — re-scoped by fabric Step 69C ---
+# The instant-push/pull listener stub is retired: Step 6 pushes the signed registry
+# Master→peer on 9090, so a Master-side ACL-push listener was never needed. 8090 is
+# now the peer→Master intake (telemetry evidence and, from fabric Step 70B, RFI
+# requests). See `peer-intake-unit` above and MASTER_OBSERVABILITY_DESIGN.md.
 
 # --- Step 8: KillSwitch ---
 .PHONY: killswitch
 
-killswitch: ## Master KillSwitch (root-gated)
-	@$(ROLE_ROOT)/scripts/sparknet-killswitch.sh
+killswitch: ## Master cluster KillSwitch; dry-run by default, FORCE=1 to engage (root)
+	@$(ROLE_ROOT)/scripts/sparknet-killswitch.sh $(if $(FORCE),--force,)
 
 # --- Step 9: scheduler ---
 .PHONY: scheduler
 
-scheduler: ## Scheduler scaffold
-	@$(PY) $(VAULT_ROOT)/services/sparknet-scheduler.py
+scheduler: ## Nocturnal scheduler CLI (ARGS='plan|arm ...|status|abort ...'; default --help)
+	@$(PY) "$(VAULT_ROOT)/services/sparknet-scheduler.py" $(if $(ARGS),$(ARGS),--help)
+
+scheduler-status: ## Show the nocturnal lease state and current readiness
+	@$(PY) "$(VAULT_ROOT)/services/sparknet-scheduler.py" status
 
 # --- Step 10: share ratification ---
 .PHONY: share-ratify

@@ -1,5 +1,11 @@
 # Phase Viability Report
 
+> [!warning] **Historical report (2026-10-03 planning era).** The checkmarks
+> below record that planning-phase deliverables existed; they are not current
+> deployment status. The hardware premise was DGX Spark / ConnectX-7 / nftables;
+> the deployed fleet is AGX with iptables. See `scenarios-and-boms.md` and
+> `MASTER_BUILD_PLAN.md` for current state.
+
 ## Phase 0 - Save Google Doc + Planning Docs
 Status: FULFILLED ✓
 Viability Tests: Files exist, content intact, traceability established. All pass.
@@ -109,7 +115,9 @@ each asserts **no mutation** by hashing the whole tree before and after — so
 - **No live WireGuard / root verification.** The dev host has no `wg`,
   `wg-quick`, `nft`, no WireGuard kernel module and no `CAP_NET_ADMIN`.
   Unproven on real hardware: live handshake, `PersistentKeepalive` behaviour,
-  `chattr +i` enforcement, nftables egress rules, KillSwitch teardown/recovery.
+  `chattr +i` enforcement, iptables egress rules, KillSwitch teardown/recovery.
+  (This report predates the live fleet; nftables was the original plan, but the
+  deployed nodes use iptables.)
   `tests/test_guard.py` covers refusal and dry-run paths only; the **live apply
   path has never executed**. See the checklist at the end of
   `docs/wireguard.md`.

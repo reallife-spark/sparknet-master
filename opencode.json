@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md",
+    "MISSION.md",
+    "INTENT.md",
+    "00_System/alpha-admin.md"
+  ],
+  "references": {
+    "knowledge": {
+      "path": ".",
+      "description": "The master-node knowledge vault. Use for this role's authority model, design intent, operating rules, plans and decisions."
+    }
+  },
+  "permission": {
+    "edit": {
+      "*": "allow",
+      "../peer-node/**": "deny",
+      "$SPARKNET_STATE_DIR/keys/**": "deny",
+      ".state/keys/**": "deny",
+      "../contracts/**": "deny",
+      "../shared/**": "deny"
+    },
+    "bash": {
+      "*": "allow",
+      "*$SPARKNET_STATE_DIR/keys*": "deny",
+      "*signer.sock*": "deny"
+    }
+  }
+}

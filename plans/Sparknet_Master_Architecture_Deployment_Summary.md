@@ -1,4 +1,16 @@
 ﻿Sparknet Master Architecture & Deployment Summary
+
+> [!warning] **Historical blueprint (2026-09), not the deployed fabric.**
+> This is the original design transcript. It assumes four DGX Spark hosts,
+> 128 GB unified memory each, ConnectX-7 RoCEv2/RDMA and a 512 GB+ pooled UMA.
+> None of that hardware is present. The deployed pair is `agx64` (peer,
+> 63,198 MiB) and `agx32` (Master, 30,990 MiB), with no RDMA and no shared GPU
+> address space. Nocturnal mode is now a time-boxed batch lease over independent
+> whole-node jobs, not memory pooling. For current facts see
+> [`scenarios-and-boms.md`](scenarios-and-boms.md) and
+> [`NOCTURNAL_BATCH_DESIGN.md`](NOCTURNAL_BATCH_DESIGN.md). The transcript below
+> is preserved to show what was designed, not what runs.
+
 This document consolidates the complete architectural specification for Sparknet, a secure, EU AI Act-compliant decentralized multi-agent coordination and zero-latency AI memory pooling fabric built specifically for NVIDIA DGX Spark (Grace Blackwell) hardware.
 1. Core System & Hardware Fabric
 * Dual-Tier Operation:

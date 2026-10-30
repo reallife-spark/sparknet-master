@@ -99,14 +99,16 @@ change, so it requires unanimity. That asymmetry is the same reasoning recorded 
 
 ## What is not verified here
 
-- **No live cluster exists on the development host.** No key has signed a real
-  registry entry, no election has been run between three machines, and no key has
-  ever crossed a process boundary. Every claim in this document is about the code
-  path, not about observed fabric behaviour.
+- **No live cluster exists on the development host.** That is a host limitation,
+  not the fabric's state. The election→signer→registry arc ran on two real hosts
+  (agx64/agx32) on 2026-10-07: a 2/2 root, a live registry entry signed by the
+  isolated signer, a key crossing a process boundary, a reboot, and a
+  revoke/restore cycle. A three-machine election has **not** been run; do not
+  generalise the two-host proof into one.
 - **Containment is architectural, not penetration-tested.** The tests assert the
   topology — the signer is unreachable from the peer surface — which is not the same
   as having tried to break it.
-- **Interim signing is weaker.** While the Master is unbuilt, grants are signed by
-  an operator holding the key offline and distributed by hand. There is no
-  revocation channel in that arrangement, and `../../contracts/identity-schema.json`
-  records it as weaker rather than equivalent.
+- **Hand-distributed, offline signing is retired.** Registry distribution is the
+  signed publication the Master pushes to each peer's guard on 9090, with a
+  monotonic `sequence`; there is no supported "operator signs offline and copies
+  the file" path.

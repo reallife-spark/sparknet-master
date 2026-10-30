@@ -1,0 +1,44 @@
+# The Master's reflex broker — a local sensor, never authority.
+#
+# Not enabled by `make units`. There is no credential to provision and no egress
+# to allow: every backend in contracts/reflex-schema.json's vocabulary is local,
+# so the broker cannot reach outside the fabric however it is configured.
+# `make reflex-unit` stages the file; enabling it is an operator decision.
+#
+# It binds the Master's overlay address only. Loopback and the Master's own
+# overlay address are accepted; every peer overlay source is refused in Phase 1.
+# The broker is a sensor: timeout, backend error or budget exhaustion abstain,
+# and nothing here can sign, grant, revoke or approve.
+
+[Unit]
+Description=Sparknet Master reflex broker (local-first sensor, never authority)
+After=network-online.target sparknet-master-wireguard-anchor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.env
+Environment=SPARKNET_REFLEX_BIND=10.100.0.1
+Environment=SPARKNET_REFLEX_PORT=4224
+Environment=SPARKNET_REFLEX_BACKEND=local
+Environment=SPARKNET_REFLEX_LOCAL_URL=http://127.0.0.1:8000
+Environment=SPARKNET_REFLEX_LOCAL_MODEL=local
+Environment=SPARKNET_REFLEX_MODEL=local
+Environment=SPARKNET_REFLEX_TIMEOUT=2.0
+Environment=SPARKNET_REFLEX_AUDIT=/mnt/log/sparknet-reflex.jsonl
+ExecStart=/usr/bin/env python3 %h/services/sparknet-reflex-broker.py --serve \
+    --bind ${SPARKNET_REFLEX_BIND} \
+    --port ${SPARKNET_REFLEX_PORT} \
+    --model ${SPARKNET_REFLEX_MODEL} \
+    --timeout ${SPARKNET_REFLEX_TIMEOUT} \
+    --audit ${SPARKNET_REFLEX_AUDIT}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadWritePaths=/mnt/log
+
+[Install]
+WantedBy=multi-user.target
