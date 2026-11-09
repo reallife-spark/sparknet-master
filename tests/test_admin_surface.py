@@ -91,6 +91,9 @@ def test_the_admin_agents_resolve_through_the_opencode_cli(tmp_path):
     """
     if shutil.which("opencode") is None:
         pytest.skip("opencode CLI not on PATH; the on-disk test above still applies")
+    version = subprocess.run(["opencode", "--version"], capture_output=True, text=True, check=False)
+    if not version.stdout.strip().startswith("2."):
+        pytest.skip(f"opencode {version.stdout.strip() or 'unknown'} does not load the pinned 2.x agent directory")
 
     out = tmp_path / "agent-list.txt"
     with out.open("w") as handle:
