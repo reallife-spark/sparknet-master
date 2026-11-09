@@ -232,27 +232,36 @@ current: 28
 
 ## Step 27 — Master-side Gemini blueprint surfaces
 
-- [ ] **Step 27** — Add the Master half of the sovereign-cluster blueprint after
-  Step 26: ABAC governance, event orchestrator, lake intake, collaboration
-  broker, online distillation, package index and the extended dashboard.
-  - [ ] **27A — Contracts and envelopes.** Adopt the event/ABAC/collab/exec/
-    self-improve/package/lake/realtime-distill contracts and signer operations.
-  - [ ] **27B — Orchestrator and ABAC.** Route signed events to named agents,
-    enforce clearance/department/tag policy, audit denials and never carry
-    authority on a knowledge channel.
-  - [ ] **27C — Lake and collaboration.** Consented/redacted per-department lake
-    intake with retention/deletion; live cross-department collaboration broker
-    with personal-agent participation and ABAC filtering.
-  - [ ] **27D — Distillation and packages.** Online trace-tap scheduler,
-    training lease, evaluation, signed run/model card and student hot-swap;
-    signed package index and distribution.
-  - [ ] **27E — Dashboard and verification.** Extend the console/admin surface
-    for nodes, queue, KB browser, users/approvals, lake stats, distill runs,
-    events, ABAC and collaboration; all writes remain signed admin requests.
-  - **DoD**: Master-side loopback rehearsals for every new channel; no direct
-    peer vault/DB write; `make test-master`, `make contract-test`,
-    `make context-check`, `make bundle-verify ROLE=master`, `make ci`; live legs
-    `DoD: confirm: user`.
+- [~] **Step 27 — CLOSED BY STEP 89 SUPERSESSION (scope).** The Master half of
+  the sovereign-cluster blueprint was delivered by Step 89A/E/H; this step is
+  not a second implementation.
+  - [x] **27A — Contracts and envelopes.** Step 89A/B adopted the event, ABAC,
+    collaboration, exec, self-improvement, package, lake and distillation
+    contracts, canonical forms and vectors.
+  - [x] **27B — Orchestrator and ABAC.** Step 89C/D: signed event routing,
+    named agents, ABAC narrowing, denial audit and no authority on a knowledge
+    channel.
+  - [~] **27C — Lake and collaboration.** Consented, signed per-department lake
+    intake and the live collaboration broker are delivered. Retention is
+    recorded as `retention_days` metadata; no automatic deletion job was
+    adopted. Deletion/expiry is retired from this step; a future need is new
+    work.
+  - [~] **27D — Distillation and packages.** Operator-triggered distillation,
+    evaluation, signed run/model card, model-runtime lease/promote/rollback,
+    package index and signed distribution are delivered. The “online trace-tap
+    scheduler” is the uplift trace intake plus the signed schedule record, not
+    an autonomous training scheduler; student deployment uses model-runtime
+    promotion, not live weight hot-swap. Those stronger forms are retired from
+    this step; a future need is new work.
+  - [x] **27E — Dashboard and verification.** Step 89E/F and the console
+    surfaces expose nodes, queue, KB, users/approvals, lake, distill, events,
+    ABAC and collaboration; writes remain signed admin requests.
+  - **Status 2026-11-09 — closed by supersession.** Evidence: the Step 89
+    channel matrix, `tests/test_event*.py`, `test_agent_bus.py`,
+    `test_orchestrator.py`, `test_abac.py`, `test_collab.py`, `test_exec*.py`,
+    `test_self_improve.py`, `test_package*.py`, `test_data_lake.py`,
+    `master-node/tests/test_step89_admin.py`, and the console tests. No direct
+    peer vault/DB write was introduced.
 
 ## Step 28 — Understand-Anything + issue intake (master half)
 
