@@ -4,23 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import http.client
-import importlib.util
 import json
 import threading
 from pathlib import Path
+
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 TOKEN = "test-registry-token-0123456789"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location(
-        "sparknet_container_registry", ROLE_ROOT / "services" / "sparknet-container-registry.py"
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path("sparknet_container_registry", ROLE_ROOT / "services" / "sparknet-container-registry.py")
 
 
 registry = _load()

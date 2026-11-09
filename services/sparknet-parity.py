@@ -25,11 +25,13 @@ Master does belongs in this role's own service, not smuggled into a re-export.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import sys
 from pathlib import Path
 from types import ModuleType
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -100,13 +102,7 @@ def load_peer_service(name: str) -> ModuleType:
     if module_name in sys.modules:
         return sys.modules[module_name]
     path = directory / name
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise ParityError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(module_name, path)
 
 
 def resolved_paths() -> dict[str, str]:

@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
 import secrets
@@ -46,6 +45,9 @@ from collections.abc import Sequence
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = ROLE_ROOT.parent
@@ -87,13 +89,7 @@ class SchedulerError(Exception):
 def _load_module(path: Path, name: str) -> Any:
     if name in sys.modules:
         return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise SchedulerError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 def _authz() -> Any:

@@ -53,6 +53,15 @@ fingerprint match, freshness, nonce replay — there is no signature to check, p
 Step 68A), then written as one queue artifact for the composer that Step 70C wires.
 It is not answered here and cannot widen a scope.
 
+The issue route is signed and capability-gated
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``POST /api/v1/issues`` (fabric Step 91) carries a peer work item. It requires the
+peer-held ``issue-report`` capability, a registered non-revoked overlay source, a
+node-key signature over the raw body (``shared/sparknet-http.py``), a trusted key
+for the named node, and ``authz.verify_issue_report`` for shape, digest, expiry and
+nonce replay. It stores the item append-only; it never executes it, installs it into
+a vault or serves it as knowledge.
+
 Neither route carries authority
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 A report is recorded as evidence and acknowledged; a request is queued for a human
@@ -72,24 +81,37 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
-import importlib.util
 import json
 import os
+import re
 import sys
 import tempfile
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from sparknet_loader import load_by_path
+
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = ROLE_ROOT.parent
 AUTHZ_PATH = REPO_ROOT / "shared" / "sparknet-authz.py"
+HTTP_PATH = REPO_ROOT / "shared" / "sparknet-http.py"
 
 DEFAULT_BIND = "10.100.0.1"
 DEFAULT_PORT = 8090
 DEFAULT_REGISTRY = ROLE_ROOT / "manifests" / "node-authorizations.json"
 DEFAULT_REQUEST_DIR = "/mnt/log/sparknet-rfi-requests"
 MAX_BODY = 256 * 1024
+ISSUE_MAX_AGE_SECONDS = 300
+ISSUE_SECRET_PATTERNS = (
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(r"(?i)\b(api[_-]?key|token|password|passwd|secret|private[_-]?key)\b\s*[:=]\s*[A-Za-z0-9_./+=~-]{12,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
+)
 
 #: Refusal reason -> HTTP status. `off_overlay`, `revoked` and `capability_missing`
 #: are the source gate's; the rest come from ``authz.verify_telemetry_report``.
@@ -104,22 +126,31 @@ REFUSAL_STATUS = {
     "expired": 403,
     "not_yet_valid": 403,
     "replayed_nonce": 409,
+    "digest_mismatch": 400,
+    "secret_shaped": 400,
+    "unknown_key": 403,
+    "unsigned": 401,
+    "bad_signature": 401,
+    "stale": 401,
 }
 
 
 def _load_authz() -> Any:
     if "sparknet_intake_authz" in sys.modules:
         return sys.modules["sparknet_intake_authz"]
-    spec = importlib.util.spec_from_file_location("sparknet_intake_authz", AUTHZ_PATH)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load the authz implementation from {AUTHZ_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["sparknet_intake_authz"] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path("sparknet_intake_authz", AUTHZ_PATH)
 
 
 authz = _load_authz()
+
+
+def _load_http() -> Any:
+    if "sparknet_intake_http" in sys.modules:
+        return sys.modules["sparknet_intake_http"]
+    return load_by_path("sparknet_intake_http", HTTP_PATH)
+
+
+http = _load_http()
 
 
 class IntakeError(Exception):
@@ -192,6 +223,14 @@ class PeerDirectory:
         except (OSError, ValueError, json.JSONDecodeError, IntakeError) as exc:
             raise IntakeError(f"registry reload failed: {exc}") from exc
 
+    def entry_for(self, client_address: str) -> dict[str, Any] | None:
+        """The registry entry for a source address, after a fresh load."""
+        try:
+            self._refresh()
+        except IntakeError:
+            return None
+        return self._by_address.get(_bare(client_address))
+
     def attribute(self, client_address: str, *, capability: str | None = "telemetry") -> tuple[str | None, str]:
         """(fingerprint, "") for an accepted source, else (None, reason).
 
@@ -246,6 +285,87 @@ class PeerDirectory:
 
 
 # --- the evidence spool -------------------------------------------------------
+
+
+def default_issue_store() -> Path:
+    env = os.environ.get("SPARKNET_ISSUE_STORE", "").strip()
+    return Path(env) if env else Path("/mnt/log/sparknet-issues.jsonl")
+
+
+class IssueStore:
+    """Append-only evidence for peer work items, with a latest-view index.
+
+    One JSON object per accepted report. The latest view is keyed by
+    ``(node_id, issue_id)`` and only moves forward on ``updated_at``; a re-send
+    of the same bytes is acknowledged and appends nothing. The nonce set is
+    rebuilt from the file, so a restart cannot replay an old report.
+    """
+
+    def __init__(self, path: Path | str, *, state_dir: Path | str | None = None) -> None:
+        self.path = Path(path)
+        self.state_dir = Path(state_dir) if state_dir else self.path.parent / "issues"
+        self.seen_nonces: set[str] = set()
+        self.latest: dict[tuple[str, str], dict[str, Any]] = {}
+        self.load()
+
+    def load(self) -> None:
+        self.seen_nonces.clear()
+        self.latest.clear()
+        if not self.path.is_file():
+            return
+        try:
+            lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            nonce = row.get("nonce")
+            if isinstance(nonce, str) and nonce:
+                self.seen_nonces.add(nonce)
+            key = (str(row.get("node_id") or ""), str(row.get("issue_id") or ""))
+            if not all(key):
+                continue
+            current = self.latest.get(key)
+            if current is None or str(row.get("updated_at") or "") >= str(current.get("updated_at") or ""):
+                self.latest[key] = row
+
+    def record(self, report: dict[str, Any], *, source: str) -> str:
+        key = (str(report["node_id"]), str(report["issue_id"]))
+        current = self.latest.get(key)
+        if current is not None and str(report["updated_at"]) <= str(current.get("updated_at") or ""):
+            self.seen_nonces.add(str(report["nonce"]))
+            return "duplicate"
+        row = {
+            "received_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "received_from": _bare(source),
+            **report,
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        with contextlib.suppress(OSError):
+            os.chmod(self.path, 0o600)
+        self.latest[key] = row
+        self.seen_nonces.add(str(report["nonce"]))
+        self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        return "recorded"
+
+    def listing(self) -> list[dict[str, Any]]:
+        return sorted(
+            self.latest.values(),
+            key=lambda row: (
+                str(row.get("received_at") or ""),
+                str(row.get("node_id") or ""),
+                str(row.get("issue_id") or ""),
+            ),
+        )
 
 
 def default_spool() -> Path:
@@ -399,19 +519,30 @@ class _Handler(BaseHTTPRequestHandler):
             self._telemetry()
         elif self.path == "/api/v1/rfi-request":
             self._rfi_request()
+        elif self.path == "/api/v1/issues":
+            self._issues()
         else:
             self._send(404, {"error": "not_found"})
 
-    def _read_body(self) -> tuple[dict[str, Any] | None, str, int]:
-        """Read one JSON object, or (None, reason, status) before any work is done."""
+    def _read_raw(self) -> tuple[bytes | None, str, int]:
         try:
             length = int(self.headers.get("Content-Length", "0") or 0)
         except ValueError:
             return None, "malformed", 400
         if length <= 0 or length > MAX_BODY:
             return None, "malformed", 413 if length > MAX_BODY else 400
+        raw = self.rfile.read(length)
+        if len(raw) != length:
+            return None, "malformed", 400
+        return raw, "", 0
+
+    def _read_body(self) -> tuple[dict[str, Any] | None, str, int]:
+        """Read one JSON object, or (None, reason, status) before any work is done."""
+        raw, reason, status = self._read_raw()
+        if raw is None:
+            return None, reason, status
         try:
-            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            body = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return None, "malformed", 400
         if not isinstance(body, dict):
@@ -480,6 +611,89 @@ class _Handler(BaseHTTPRequestHandler):
         print(f"peer-intake: queued RFI request {request['request_id']} -> {artifact.name}", file=sys.stderr)
         self._send(202, {"status": "queued", "request_id": request["request_id"]})
 
+    def _issues(self) -> None:
+        """Accept one signed work item. The route carries no authority.
+
+        Order: source/capability gate, raw body, key lookup, signature, freshness,
+        redaction, schema/digest/expiry/replay, store. The overlay identifies the
+        source; the trusted key identifies the signer; the registry entry ties the
+        two node ids together, so a valid key for one node cannot post as another.
+        """
+        client = self.client_address[0]
+        fingerprint, reason = self.server.directory.attribute(client, capability="issue-report")  # type: ignore[attr-defined]
+        if fingerprint is None:
+            self._send(REFUSAL_STATUS.get(reason, 403), {"error": reason})
+            return
+        raw, reason, status = self._read_raw()
+        if raw is None:
+            self._send(status, {"error": reason})
+            return
+        try:
+            report = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send(400, {"error": "malformed"})
+            return
+        if not isinstance(report, dict):
+            self._send(400, {"error": "malformed"})
+            return
+        node_id = str(report.get("node_id") or "")
+        entry = self.server.directory.entry_for(client)  # type: ignore[attr-defined]
+        if entry is None:
+            self._send(403, {"error": "off_overlay"})
+            return
+        entry_identity = entry.get("identity") if isinstance(entry.get("identity"), dict) else {}
+        entry_node = str(entry_identity.get("node_id") or entry.get("node_id") or "")
+        if not node_id or entry_node != node_id:
+            self._send(403, {"error": "wrong_peer"})
+            return
+        key = self.server.issue_keys.get(node_id, None)  # type: ignore[attr-defined]
+        if key is None:
+            self._send(403, {"error": "unknown_key"})
+            return
+        timestamp = self.headers.get("X-Sparknet-Timestamp", "")
+        signature = self.headers.get("X-Sparknet-Signature", "")
+        if not timestamp or not signature:
+            self._send(401, {"error": "unsigned"})
+            return
+        try:
+            message = http.request_message("POST", "/api/v1/issues", raw, timestamp)
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            self._send(400, {"error": "malformed"})
+            return
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if abs((datetime.now(timezone.utc) - parsed).total_seconds()) > ISSUE_MAX_AGE_SECONDS:
+            self._send(401, {"error": "stale"})
+            return
+        try:
+            signed = authz.verify_signature(key, signature, message)
+        except Exception:
+            signed = False
+        if not signed:
+            self._send(401, {"error": "bad_signature"})
+            return
+        text = f"{report.get('title', '')}\n{report.get('body', '')}"
+        if any(pattern.search(text) for pattern in ISSUE_SECRET_PATTERNS):
+            self._send(400, {"error": "secret_shaped"})
+            return
+        store = self.server.issue_store  # type: ignore[attr-defined]
+        ok, verify_reason = authz.verify_issue_report(
+            report,
+            expected_fingerprint=fingerprint,
+            seen_nonces=store.seen_nonces,
+        )
+        if not ok:
+            self._send(REFUSAL_STATUS.get(verify_reason, 400), {"error": verify_reason})
+            return
+        try:
+            outcome = store.record(report, source=client)
+        except OSError as exc:
+            print(f"peer-intake: issue store write failed: {exc}", file=sys.stderr)
+            self._send(503, {"error": "store_unavailable"})
+            return
+        self._send(200, {"status": outcome, "issue_id": report["issue_id"], "node_id": node_id})
+
 
 def serve(
     bind: str,
@@ -490,6 +704,8 @@ def serve(
     request_dir: Path | str | None = None,
     seen_nonces: set[str] | None = None,
     request_queue: RequestQueue | None = None,
+    issue_keys: dict[str, Any] | None = None,
+    issue_store: IssueStore | None = None,
 ) -> None:
     if bind != DEFAULT_BIND and bind not in {"127.0.0.1", "::1"}:
         raise IntakeError("refuse to bind a non-overlay address (the intake is overlay-only)")
@@ -500,6 +716,8 @@ def serve(
     server.request_queue = (  # type: ignore[attr-defined]
         request_queue if request_queue is not None else RequestQueue(request_dir or default_request_dir())
     )
+    server.issue_keys = dict(issue_keys or {})  # type: ignore[attr-defined]
+    server.issue_store = issue_store if issue_store is not None else IssueStore(default_issue_store())  # type: ignore[attr-defined]
     print(f"peer-intake: listening on {bind}:{port}", file=sys.stderr)
     server.serve_forever()
 
@@ -513,10 +731,46 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--registry", default=os.environ.get("SPARKNET_TELEMETRY_REGISTRY", str(DEFAULT_REGISTRY)))
     parser.add_argument("--spool", default=os.environ.get("SPARKNET_TELEMETRY_SPOOL", ""))
     parser.add_argument("--request-dir", default=os.environ.get("SPARKNET_RFI_REQUEST_DIR", ""))
+    parser.add_argument(
+        "--issue-key",
+        action="append",
+        default=[],
+        metavar="NODE_ID=PATH",
+        help="trusted node public key for the signed issue route (repeatable)",
+    )
+    parser.add_argument("--issue-store", default=os.environ.get("SPARKNET_ISSUE_STORE", ""))
+    parser.add_argument(
+        "--issue-keyring",
+        default=os.environ.get("SPARKNET_ISSUE_KEYRING", ""),
+        help="JSON object {node_id: public_key_b64} for the signed issue route",
+    )
     args = parser.parse_args(argv)
 
     spool = Path(args.spool) if args.spool else default_spool()
     request_dir = Path(args.request_dir) if args.request_dir else default_request_dir()
+    issue_store = Path(args.issue_store) if args.issue_store else default_issue_store()
+
+    issue_keys: dict[str, Any] = {}
+    if args.issue_keyring:
+        try:
+            keyring = json.loads(Path(args.issue_keyring).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            parser.error(f"--issue-keyring {args.issue_keyring}: {exc}")
+        if not isinstance(keyring, dict):
+            parser.error("--issue-keyring must be a JSON object {node_id: public_key_b64}")
+        for key_node, encoded in keyring.items():
+            try:
+                issue_keys[str(key_node)] = authz.public_key_from_b64(str(encoded))
+            except Exception as exc:
+                parser.error(f"--issue-keyring {key_node}: {exc}")
+    for item in args.issue_key:
+        key_node, separator, key_path = item.partition("=")
+        if not separator or not key_node or not key_path:
+            parser.error(f"--issue-key expects NODE_ID=PATH, got {item!r}")
+        try:
+            issue_keys[key_node] = authz.load_public_key(Path(key_path))
+        except Exception as exc:
+            parser.error(f"--issue-key {key_node}: cannot load {key_path}: {exc}")
 
     if args.check:
         print(
@@ -528,8 +782,11 @@ def main(argv: list[str] | None = None) -> int:
                     "registry": args.registry,
                     "spool": str(spool),
                     "request_dir": str(request_dir),
-                    "routes": ["/api/v1/telemetry", "/api/v1/rfi-request"],
-                    "authority": "none — records evidence and queues requests, never signs/grants/revokes",
+                    "issue_store": str(issue_store),
+                    "issue_keys": sorted(issue_keys),
+                    "issue_keyring": args.issue_keyring,
+                    "routes": ["/api/v1/telemetry", "/api/v1/rfi-request", "/api/v1/issues"],
+                    "authority": "none — records evidence and work items; never signs/grants/revokes",
                 },
                 indent=2,
             )
@@ -545,7 +802,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"peer-intake: cannot load the registry: {exc}", file=sys.stderr)
         return 2
     try:
-        serve(args.bind, args.port, directory=directory, spool=spool, request_dir=request_dir)
+        serve(
+            args.bind,
+            args.port,
+            directory=directory,
+            spool=spool,
+            request_dir=request_dir,
+            issue_keys=issue_keys,
+            issue_store=IssueStore(issue_store),
+        )
     except (IntakeError, OSError) as exc:
         print(f"peer-intake: {exc}", file=sys.stderr)
         return 2

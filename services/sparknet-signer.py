@@ -68,7 +68,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import errno
-import importlib.util
 import json
 import os
 import re
@@ -81,6 +80,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -157,13 +159,7 @@ def _load(name: str, path: Path):
     through `sys.modules` and raises an AttributeError about `__dict__` that
     names neither the cause nor the file.
     """
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise SignerError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 def _shared_dir() -> Path:

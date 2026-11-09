@@ -19,13 +19,12 @@ Two properties, both of which a future edit can quietly break:
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = ROLE_ROOT.parent
@@ -38,15 +37,7 @@ KEY_ROLES = ("cluster", "operational", "identity")
 
 
 def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    # The sys.modules registration is not optional: @dataclass resolves its own
-    # module through sys.modules and fails with an AttributeError about __dict__
-    # that names neither the cause nor the file.
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 @pytest.fixture(scope="module")

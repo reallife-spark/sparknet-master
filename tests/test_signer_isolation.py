@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import importlib.util
 import itertools
 import json
 import os
@@ -42,6 +41,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = ROLE_ROOT.parent
@@ -53,14 +53,7 @@ CLOCK = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
 
 
 def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    # Not optional: @dataclass resolves its own module through sys.modules and
-    # fails with an AttributeError about __dict__ that names neither cause nor file.
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 @pytest.fixture(scope="module")
@@ -1147,11 +1140,7 @@ def test_it_answers_over_a_unix_socket_and_records_to_the_ledger(signer, authz, 
         assert response["entry"]["signature_b64"] == data["signature_b64"]
 
         # And the chain must be intact, checked by the module that owns verification.
-        import importlib.util as _u
-
-        spec = _u.spec_from_file_location("ledger_for_isolation", ROLE_ROOT / "services" / "sparknet-ledger.py")
-        ledger_module = _u.module_from_spec(spec)
-        spec.loader.exec_module(ledger_module)
+        ledger_module = load_by_path("ledger_for_isolation", ROLE_ROOT / "services" / "sparknet-ledger.py")
         ok, detail = ledger_module.verify_chain(ledger)
         assert ok, detail
     finally:
@@ -1384,11 +1373,7 @@ def test_two_concurrent_requests_serialise_into_one_intact_chain(signer, tmp_pat
         assert blocks[1]["prev_hash"] == blocks[0]["hash"]
         assert blocks[2]["prev_hash"] == blocks[1]["hash"]
 
-        spec = importlib.util.spec_from_file_location(
-            "ledger_for_concurrency", ROLE_ROOT / "services" / "sparknet-ledger.py"
-        )
-        ledger_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(ledger_module)
+        ledger_module = load_by_path("ledger_for_concurrency", ROLE_ROOT / "services" / "sparknet-ledger.py")
         ok, detail = ledger_module.verify_chain(ledger)
         assert ok, detail
     finally:
@@ -1496,12 +1481,7 @@ class _SerialisingSigner:
 
 
 def _serve_forever(signer, socket_path: Path, *, read_timeout: float | None = None) -> None:
-    import importlib.util as _u
-
-    spec = _u.spec_from_file_location("signer_serve_helper", SIGNER_PATH)
-    module = _u.module_from_spec(spec)
-    sys.modules["signer_serve_helper"] = module
-    spec.loader.exec_module(module)
+    module = load_by_path("signer_serve_helper", SIGNER_PATH)
     try:
         if read_timeout is None:
             module.serve(signer, socket_path)
@@ -1772,10 +1752,7 @@ def test_ledger_verification_pins_the_operational_key(signer, signer_module, aut
     """
     ledger_path = signer.ledger_path
     ledger = json.loads(ledger_path.read_text())
-    spec = importlib.util.spec_from_file_location("ledger_for_key_pin", ROLE_ROOT / "services" / "sparknet-ledger.py")
-    ledger_module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(ledger_module)
+    ledger_module = load_by_path("ledger_for_key_pin", ROLE_ROOT / "services" / "sparknet-ledger.py")
 
     ok, detail = ledger_module.verify_chain(ledger, signer.public_key_b64)
     assert ok, detail
@@ -1823,10 +1800,7 @@ def test_ledger_pin_allows_forward_key_rotation_but_not_rollback(tmp_path, authz
     )
 
     ledger = json.loads(ledger_path.read_text())
-    spec = importlib.util.spec_from_file_location("ledger_for_rotation", ROLE_ROOT / "services" / "sparknet-ledger.py")
-    ledger_module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(ledger_module)
+    ledger_module = load_by_path("ledger_for_rotation", ROLE_ROOT / "services" / "sparknet-ledger.py")
     ok, detail = ledger_module.verify_chain(ledger, new_public)
     assert ok, detail
 

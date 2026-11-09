@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROLE_ROOT.parent / "shared"))
 
 
 def resolve_state_dir() -> Path:

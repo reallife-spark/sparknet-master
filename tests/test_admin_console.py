@@ -19,10 +19,8 @@ signer, a real peer or a real WebUI:
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import socket
-import sys
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +29,7 @@ from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = ROLE_ROOT.parent
@@ -39,13 +38,9 @@ NOW = datetime(2026, 10, 7, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
+    if not path.is_file():
         pytest.skip(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 authz = _load("sparknet_authz_console_test", SHARED_DIR / "sparknet-authz.py")

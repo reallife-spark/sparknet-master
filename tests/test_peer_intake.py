@@ -16,9 +16,7 @@ is then exercised end to end, and the gate's own branches are unit-tested direct
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
@@ -28,6 +26,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 import pytest
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = ROLE_ROOT.parent
@@ -38,12 +37,7 @@ PEER_FP = "a" * 64
 
 
 def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 intake = _load("sparknet_peer_intake", INTAKE_PATH)

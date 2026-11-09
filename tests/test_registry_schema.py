@@ -15,12 +15,11 @@ to a draft, which is the only version of this that can stay true.
 from __future__ import annotations
 
 import base64
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import pytest
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = ROLE_ROOT.parent
@@ -32,12 +31,7 @@ SHIPPED_REGISTRY = FABRIC_ROOT / "peer-node" / "manifests" / "node-authorization
 
 def _load(name: str, path: Path):
     """Load a fabric module by path, once."""
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader, f"cannot load {path}"
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 @pytest.fixture(scope="module")

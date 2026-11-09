@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from sparknet_loader import load_by_path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "master-node" / "services" / "sparknet-step89-admin.py"
@@ -14,12 +14,7 @@ SHARED = ROOT / "shared"
 
 
 def _load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 admin = _load("step89_admin_test", SCRIPT)

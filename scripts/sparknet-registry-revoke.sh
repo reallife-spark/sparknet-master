@@ -39,7 +39,6 @@ PY="${PY:-$FABRIC_ROOT/.venv/bin/python}"
 
 IDENTITY_PATH="$IDENTITY" NODE_PUBKEY_VALUE="$NODE_PUBKEY" OP_PRIV_PATH="$OP_PRIV" \
 OUT_PATH="$OUT" FABRIC_ROOT="$FABRIC_ROOT" "$PY" - <<'PYEOF'
-import importlib.util
 import json
 import os
 import sys
@@ -47,11 +46,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 fabric_root = os.environ["FABRIC_ROOT"]
-sys.path.insert(0, fabric_root)
-spec = importlib.util.spec_from_file_location("authz", f"{fabric_root}/shared/sparknet-authz.py")
-authz = importlib.util.module_from_spec(spec)
-sys.modules["authz"] = authz
-spec.loader.exec_module(authz)
+sys.path.insert(0, f"{fabric_root}/shared")
+from sparknet_loader import load_shared
+authz = load_shared("sparknet-authz.py", "sparknet_authz", dirs=[f"{fabric_root}/shared"])
 
 identity = json.loads(Path(os.environ["IDENTITY_PATH"]).read_text())
 raw_pub = os.environ.get("NODE_PUBKEY_VALUE", "").strip()

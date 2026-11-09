@@ -9,11 +9,9 @@ for the isolated process, and the resulting envelope is verified independently.
 from __future__ import annotations
 
 import base64
-import importlib.util
 import json
 import socket
 import subprocess
-import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +19,7 @@ from types import ModuleType
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 SHARED = ROLE_ROOT.parent / "shared"
@@ -28,12 +27,7 @@ CLOCK = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
 
 
 def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 @pytest.fixture(scope="module")

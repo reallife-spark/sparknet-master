@@ -8,14 +8,13 @@ not write the registry or alter evidence.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from sparknet_loader import load_by_path
 
 SERVICES = Path(__file__).resolve().parent.parent / "services"
 EVENT = {
@@ -30,15 +29,7 @@ EVENT = {
 
 
 def _load(name: str, filename: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, SERVICES / filename)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
-    return module
+    return load_by_path(name, SERVICES / filename)
 
 
 @pytest.fixture(scope="module")

@@ -14,9 +14,7 @@ a test rather than a configuration change nobody reviews.
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -25,6 +23,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 import pytest
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 BROKER_PATH = ROLE_ROOT / "services" / "sparknet-reflex-broker.py"
@@ -36,15 +35,7 @@ PINNED_MODEL = "qwen2.5-3b-32k"
 
 @pytest.fixture(scope="module")
 def broker() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("sparknet_reflex_broker", BROKER_PATH)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
-    return module
+    return load_by_path("sparknet_reflex_broker", BROKER_PATH)
 
 
 def _request(broker: ModuleType, model: str = "local", node_id: str = "master") -> dict:

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import importlib.util
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 SERVICES = ROLE_ROOT / "services"
@@ -15,12 +14,7 @@ PEER_ROOT = ROLE_ROOT.parent / "peer-node"
 
 
 def _module():
-    spec = importlib.util.spec_from_file_location("sparknet_killswitch", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path("sparknet_killswitch", SCRIPT)
 
 
 @pytest.fixture()

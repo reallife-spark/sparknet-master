@@ -34,7 +34,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import sys
@@ -43,6 +42,9 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = ROLE_ROOT.parent
@@ -63,13 +65,7 @@ ALLOWED_SOURCES = {"127.0.0.1", "::1", DEFAULT_BIND}
 def _load_reflex() -> Any:
     if "sparknet_reflex" in sys.modules:
         return sys.modules["sparknet_reflex"]
-    spec = importlib.util.spec_from_file_location("sparknet_reflex", REFLEX_PATH)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load the reflex contract from {REFLEX_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["sparknet_reflex"] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path("sparknet_reflex", REFLEX_PATH)
 
 
 reflex = _load_reflex()

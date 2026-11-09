@@ -29,6 +29,7 @@ import stat
 from pathlib import Path
 
 import pytest
+from sparknet_loader import load_by_path
 
 VAULT_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = VAULT_ROOT.parent
@@ -379,19 +380,14 @@ def test_the_identity_manifest_uses_the_contract_field_names():
     `wireguard_pubkey_b64` while the contract, the peer manifest, authz and the
     docs all said `wireguard_public_key_b64`.
     """
-    import importlib.util
     import json
-    import sys
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
     manifest = json.loads((root / "master-node/manifests/node-identity.json").read_text())
     contract = json.loads((root / "contracts/identity-schema.json").read_text())
 
-    spec = importlib.util.spec_from_file_location("spec_authz_field_check", root / "shared/sparknet-authz.py")
-    authz = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = authz
-    spec.loader.exec_module(authz)
+    authz = load_by_path("spec_authz_field_check", root / "shared/sparknet-authz.py")
 
     declared = tuple(contract["identity_fields"])
     assert declared == authz.IDENTITY_FIELDS, (

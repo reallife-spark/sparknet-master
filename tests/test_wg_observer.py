@@ -3,28 +3,22 @@
 from __future__ import annotations
 
 import base64
-import importlib.util
 import json
 import os
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROLE_ROOT / "services" / "sparknet-wg-observer.py"
 
 
 def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("sparknet_wg_observer", SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path("sparknet_wg_observer", SCRIPT)
 
 
 observer = _load()

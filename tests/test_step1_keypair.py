@@ -28,17 +28,16 @@ step can assert is that the first never quietly becomes the second.
 from __future__ import annotations
 
 import base64
-import importlib.util
 import json
 import os
 import re
 import stat
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 from conftest import resolve_state_dir
+from sparknet_loader import load_by_path
 
 VAULT_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = VAULT_ROOT.parent
@@ -77,12 +76,7 @@ needs_keys = pytest.mark.skipif(
 
 
 def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 @pytest.fixture(scope="module")

@@ -23,7 +23,6 @@ target-node step, and the peer's own suite says the same.
 from __future__ import annotations
 
 import base64
-import importlib.util
 import json
 import os
 import socket
@@ -37,6 +36,7 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sparknet_loader import load_by_path
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = ROLE_ROOT.parent
@@ -46,17 +46,7 @@ GUARD_ROUTE = "/api/v1/critical-file/patch"
 
 def _load_authz():
     """The one shared implementation, by path — the reason there is one."""
-    spec = importlib.util.spec_from_file_location(
-        "sparknet_authz_approval", FABRIC_ROOT / "shared" / "sparknet-authz.py"
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
-    return module
+    return load_by_path("sparknet_authz_approval", FABRIC_ROOT / "shared" / "sparknet-authz.py")
 
 
 authz = _load_authz()

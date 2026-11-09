@@ -38,6 +38,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from sparknet_loader import load_by_path
+
 SERVICE_DIR = Path(__file__).resolve().parent
 ROLE_ROOT = SERVICE_DIR.parent
 FABRIC_ROOT = ROLE_ROOT.parent
@@ -52,17 +55,9 @@ SECRET_PATTERNS = re.compile(r"(?i)(api[_-]?key|secret|token|password|passwd|pri
 
 
 def _load(name: str, path: Path) -> Any:
-    if name in sys.modules:
-        return sys.modules[name]
     if not path.is_file():
         return None
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_by_path(name, path)
 
 
 def authz() -> Any:
