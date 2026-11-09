@@ -1876,3 +1876,116 @@ def test_caller_allowlist_can_use_a_dedicated_signer_uid(signer_module):
     finally:
         left.close()
         right.close()
+
+
+# --- the operation catalog ----------------------------------------------------
+
+
+def _publication() -> dict:
+    """The signer derives the registry digest, so the input carries only the document."""
+    return {
+        "sequence": 1,
+        "published_at": CLOCK.isoformat(),
+        "registry": {"authorizations": []},
+    }
+
+
+def _share_evidence() -> dict:
+    return {
+        "event_type": "share-access",
+        "grant_id": "grant-1",
+        "node_pair": "a-b",
+        "share_type": "kb-view",
+        "content_sha256": "b" * 64,
+        "captured_at": CLOCK.isoformat(),
+    }
+
+
+def _trust_transition() -> dict:
+    return {
+        "schema_version": "1.0",
+        "node_id": "peer-1",
+        "level": "flagged",
+        "previous_level": "authenticated",
+        "reason": "review-needed",
+        "decided_at": CLOCK.isoformat(),
+        "reversible": True,
+        "flag_preserved": True,
+    }
+
+
+def _distillation_run() -> dict:
+    return {
+        "run_id": "run-1",
+        "dataset_id": "ds-1",
+        "teacher_model_id": "teacher",
+        "teacher_sha256": "a" * 64,
+        "student_base_model": "student",
+        "student_base_sha256": "b" * 64,
+        "hyperparameters": {"lr": 0.1},
+        "eval_metrics": {"score": 0.9},
+        "artifact_sha256": "c" * 64,
+        "decided_by": "master",
+        "decided_at": CLOCK.isoformat(),
+        "approved": True,
+    }
+
+
+def _valid_operation_requests() -> dict[str, dict]:
+    """One valid request body per catalog row, used by the table-driven test."""
+    return {
+        "sign-registry-entry": {"entry": _entry()},
+        "sign-registry-publication": {"publication": _publication()},
+        "sign-guard-approval": {"approval": _guard_approval()},
+        "sign-cluster-job": {"job": _job()},
+        "sign-admin-request": {"request": _admin_request()},
+        "sign-rfi-answer": {"answer": _rfi_answer()},
+        "sign-share-ratification": {"ratification": _share_ratification()},
+        "record-share-evidence": {"evidence": _share_evidence()},
+        "sign-trust-transition": {"transition": _trust_transition()},
+        "sign-distillation-run": {"run": _distillation_run()},
+    }
+
+
+def test_the_operation_catalog_is_the_published_operation_set(signer_module) -> None:
+    catalog = signer_module.SIGNER_OPERATIONS
+    assert tuple(catalog) == signer_module.SIGN_OPERATIONS
+    assert set(signer_module.OPERATIONS) == set(catalog) | set(signer_module.READ_OPERATIONS)
+    assert signer_module.describe()["signs"] == list(signer_module.SIGN_OPERATIONS)
+
+    for op, operation in catalog.items():
+        assert operation.name == op
+        assert operation.request_field
+        assert operation.request_phrase
+        assert operation.ledger_event
+        assert operation.response_key != ""  # None or a real key
+        assert callable(operation.prepare), f"{op} has no prepare function"
+
+
+def test_every_operation_has_one_valid_path_and_one_ledger_record(signer, signer_module) -> None:
+    requests = _valid_operation_requests()
+    assert set(requests) == set(signer_module.SIGNER_OPERATIONS)
+
+    for op in signer_module.SIGN_OPERATIONS:
+        operation = signer_module.SIGNER_OPERATIONS[op]
+        response = signer.handle({"op": op, "root_id": signer.root_id, **requests[op]})
+        assert response["ok"], f"{op}: {response.get('error')}"
+        assert "ledger_block" in response
+
+        if operation.response_key is not None:
+            assert operation.response_key in response, f"{op} lost response key {operation.response_key}"
+        else:
+            assert "content_sha256" in response, f"{op} lost its operation-specific response"
+
+        ledger = json.loads(signer.ledger_path.read_text())
+        last = ledger["blocks"][-1]["data"]
+        assert last["event"] == operation.ledger_event, f"{op} recorded the wrong ledger event"
+
+    assert signer.signed_count == len(signer_module.SIGN_OPERATIONS)
+
+
+def test_a_missing_request_object_is_named_by_the_catalog(signer, signer_module) -> None:
+    for op, operation in signer_module.SIGNER_OPERATIONS.items():
+        response = signer.handle({"op": op, "root_id": signer.root_id})
+        assert response["ok"] is False
+        assert f"requires {operation.request_phrase}" in response["error"]

@@ -16,7 +16,7 @@ recorded in `../security/key-management.md`; the topology is asserted in
 
 ## What it will sign
 
-Exactly six payload types, all built from structured input:
+Exactly the operations in `SIGN_OPERATIONS`, all built from structured input:
 
 | Operation | Signs |
 |---|---|
@@ -26,6 +26,10 @@ Exactly six payload types, all built from structured input:
 | `sign-cluster-job` | a cluster job, via `authz.cluster_job_message` |
 | `sign-admin-request` | an `admin-supervise` admin request, via `authz.admin_request_message` |
 | `sign-rfi-answer` | an RFI answer for one named peer's inbox, via `authz.rfi_answer_message` |
+| `sign-share-ratification` | a share ratification, recorded as a `share_ratified` event |
+| `record-share-evidence` | a share evidence digest, recorded as `share_evidence` |
+| `sign-trust-transition` | a reversible trust transition, recorded as `trust_level_changed` |
+| `sign-distillation-run` | a distillation run, recorded as `distillation_run` |
 
 There is deliberately **no "sign these bytes" operation**. The build plan's
 wording for this step was "accepts only canonical bytes already co-signed by the
@@ -77,6 +81,8 @@ import struct
 import sys
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -121,22 +127,9 @@ REQUEST_READ_TIMEOUT_SECONDS = 30.0
 #: that is a different process with its own key, not a second entry here.
 SIGNER_CAPABILITIES = frozenset({"sign"})
 
-#: Operations this process answers. Anything else is refused, including future
-#: additions someone makes in a hurry while the socket is open.
-SIGN_OPERATIONS = (
-    "sign-registry-entry",
-    "sign-registry-publication",
-    "sign-guard-approval",
-    "sign-cluster-job",
-    "sign-admin-request",
-    "sign-rfi-answer",
-    "sign-share-ratification",
-    "record-share-evidence",
-    "sign-trust-transition",
-    "sign-distillation-run",
-)
+#: Read-only operations. The signing operations are derived from the catalog
+#: below, so ``describe()`` and the refusal message cannot list a stale set.
 READ_OPERATIONS = ("capabilities", "public-key", "root-id", "ping")
-OPERATIONS = SIGN_OPERATIONS + READ_OPERATIONS
 
 #: The guard-approval envelope is *not* defined here. Its rule lives in
 #: shared/sparknet-authz.py (GUARD_APPROVAL_FIELDS, guard_approval_message),
@@ -147,6 +140,40 @@ OPERATIONS = SIGN_OPERATIONS + READ_OPERATIONS
 
 class SignerError(Exception):
     """A refusal. Every refusal is a message the caller can act on."""
+
+
+class SignerRefusal(Exception):
+    """An operation-level refusal; the common path turns it into a response."""
+
+
+@dataclass(frozen=True)
+class SignerOutcome:
+    """What one operation prepared: the artifact, subject and ledger record."""
+
+    subject: str
+    ledger_event: str
+    ledger_payload: dict[str, Any]
+    response_key: str | None = None
+    artifact: dict[str, Any] | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SignerOperation:
+    """One row of the signer's operation catalog.
+
+    The prepare callable owns the security-sensitive projection and policy. The
+    common signer path owns root pinning, request-object validation, the ledger
+    append and the response envelope, so adding an operation is one row plus its
+    named prepare function.
+    """
+
+    name: str
+    request_field: str
+    request_phrase: str
+    response_key: str | None
+    ledger_event: str
+    prepare: Callable[[Signer, str, dict[str, Any]], SignerOutcome]
 
 
 # --- loading the one implementations ----------------------------------------
@@ -569,36 +596,52 @@ class Signer:
         except SignerError as exc:
             return self._refuse(str(exc))
 
-        if op == "sign-registry-entry":
-            return self._sign_registry_entry(op, request)
-        if op == "sign-registry-publication":
-            return self._sign_registry_publication(op, request)
-        if op == "sign-cluster-job":
-            return self._sign_cluster_job(op, request)
-        if op == "sign-admin-request":
-            return self._sign_admin_request(op, request)
-        if op == "sign-rfi-answer":
-            return self._sign_rfi_answer(op, request)
-        if op == "sign-share-ratification":
-            return self._sign_share_ratification(op, request)
-        if op == "record-share-evidence":
-            return self._record_share_evidence(op, request)
-        if op == "sign-trust-transition":
-            return self._sign_trust_transition(op, request)
-        if op == "sign-distillation-run":
-            return self._sign_distillation_run(op, request)
-        return self._sign_guard_approval(op, request)
+        operation = SIGNER_OPERATIONS.get(op)
+        if operation is None:
+            return self._refuse(f"unknown operation {op!r}; this signer answers only {', '.join(OPERATIONS)}")
+        value = request.get(operation.request_field)
+        if not isinstance(value, dict):
+            return self._refuse(f"{op} requires {operation.request_phrase}")
+        try:
+            outcome = operation.prepare(self, op, value)
+        except SignerRefusal as exc:
+            return self._refuse(str(exc))
+        block = self._append_outcome(outcome)
+        response: dict[str, Any] = {"ok": True, "ledger_block": block["hash"]}
+        if outcome.response_key is not None:
+            response[outcome.response_key] = outcome.artifact
+        response.update(outcome.extra)
+        return response
 
-    def _sign_registry_entry(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
-        entry = request.get("entry")
-        if not isinstance(entry, dict):
-            return self._refuse("sign-registry-entry requires an 'entry' object")
+    def _append_outcome(self, outcome: SignerOutcome) -> dict[str, Any]:
+        """Append the operation's one ledger record to the signed chain."""
+        self.signed_count += 1
+        return record_event(
+            self.ledger_path,
+            self.node_id,
+            outcome.ledger_event,
+            outcome.ledger_payload,
+            self.root_id,
+            authz=self.authz,
+            private_key=self.key,
+            node_pubkey_b64=self.public_key_b64,
+            clock=self.clock,
+        )
 
+    @staticmethod
+    def _signature_issued(op: str, subject: str, signature_b64: str) -> dict[str, Any]:
+        return {
+            "operation": op,
+            "subject": subject,
+            "signature_b64": signature_b64,
+        }
+
+    def _prepare_registry_entry(self, op: str, entry: dict[str, Any]) -> SignerOutcome:
         unsigned = {k: v for k, v in entry.items() if k != "signature_b64"}
         required = ("fingerprint", "identity", "capabilities", "issued_at", "expires_at")
         missing = [f for f in required if f not in unsigned]
         if missing:
-            return self._refuse(
+            raise SignerRefusal(
                 f"registry entry missing {', '.join(missing)}. The signer builds the "
                 f"canonical envelope itself; it will not sign a partial entry."
             )
@@ -606,11 +649,11 @@ class Signer:
         try:
             message = self.authz.authorization_message(unsigned)
         except Exception as exc:
-            return self._refuse(f"registry entry is not canonicalisable: {exc}")
+            raise SignerRefusal(f"registry entry is not canonicalisable: {exc}") from exc
 
         unknown = [c for c in unsigned["capabilities"] if c not in self.authz.KNOWN_CAPABILITIES]
         if unknown:
-            return self._refuse(f"refusing to grant unknown capabilities: {unknown}")
+            raise SignerRefusal(f"refusing to grant unknown capabilities: {unknown}")
 
         # The registry is filed *by* fingerprint, and `authz.evaluate` refuses an
         # entry whose identity does not hash to the fingerprint it is filed under.
@@ -620,9 +663,9 @@ class Signer:
         try:
             actual = self.authz.fingerprint(unsigned["identity"])
         except Exception as exc:
-            return self._refuse(f"registry entry identity is malformed: {exc}")
+            raise SignerRefusal(f"registry entry identity is malformed: {exc}") from exc
         if actual != unsigned["fingerprint"]:
-            return self._refuse(
+            raise SignerRefusal(
                 f"registry entry is filed under fingerprint {str(unsigned['fingerprint'])[:16]}... "
                 f"but its identity hashes to {actual[:16]}... . This is the same defect "
                 f"authz.evaluate calls 'unknown_fingerprint'; signing it would mint an "
@@ -635,33 +678,30 @@ class Signer:
         revoked = bool(unsigned.get("revoked", False))
         signature_b64 = self.authz.sign_bytes(self.key, message)
         subject = str(unsigned["fingerprint"])
-        block = self._record(op, subject, signature_b64)
-        return {
-            "ok": True,
-            "entry": {**unsigned, "signature_b64": signature_b64},
-            "ledger_block": block["hash"],
-            "revoked": revoked,
-        }
+        return SignerOutcome(
+            subject=subject,
+            ledger_event="signature_issued",
+            ledger_payload=self._signature_issued(op, subject, signature_b64),
+            response_key="entry",
+            artifact={**unsigned, "signature_b64": signature_b64},
+            extra={"revoked": revoked},
+        )
 
-    def _sign_registry_publication(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
-        publication = request.get("publication")
-        if not isinstance(publication, dict):
-            return self._refuse("sign-registry-publication requires a 'publication' object")
-
+    def _prepare_registry_publication(self, op: str, publication: dict[str, Any]) -> SignerOutcome:
         # The digest is computed *here*, never taken from the caller. A caller
         # cannot hand the signer a digest that names one registry and a document
         # that says another, because the digest is derived from the document.
         unsigned = {k: publication.get(k) for k in ("sequence", "published_at")}
         unsigned["registry"] = publication.get("registry")
         if not isinstance(unsigned["registry"], dict):
-            return self._refuse("publication requires a 'registry' object")
+            raise SignerRefusal("publication requires a 'registry' object")
         try:
             unsigned["registry_sha256"] = self.authz.registry_digest(unsigned["registry"])
             message = self.authz.registry_publication_message(unsigned)
         except self.authz.AuthzError as exc:
-            return self._refuse(f"refusing to sign this publication: {exc}")
+            raise SignerRefusal(f"refusing to sign this publication: {exc}") from exc
         except Exception as exc:
-            return self._refuse(f"publication is not canonicalisable: {exc}")
+            raise SignerRefusal(f"publication is not canonicalisable: {exc}") from exc
 
         # Re-validating the entries here would duplicate the schema checker and
         # the peer. The signer's job is the *publication*: sequence, digest and
@@ -669,18 +709,17 @@ class Signer:
         # registry-publish (which checks the document before calling this) and
         # again by every peer (which evaluates each entry on install).
         signature_b64 = self.authz.sign_bytes(self.key, message)
-        block = self._record(op, f"sequence-{unsigned['sequence']}", signature_b64)
-        return {
-            "ok": True,
-            "publication": unsigned,
-            "signature_b64": signature_b64,
-            "ledger_block": block["hash"],
-        }
+        subject = f"sequence-{unsigned['sequence']}"
+        return SignerOutcome(
+            subject=subject,
+            ledger_event="signature_issued",
+            ledger_payload=self._signature_issued(op, subject, signature_b64),
+            response_key="publication",
+            artifact=unsigned,
+            extra={"signature_b64": signature_b64},
+        )
 
-    def _sign_guard_approval(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
-        approval = request.get("approval")
-        if not isinstance(approval, dict):
-            return self._refuse("sign-guard-approval requires an 'approval' object")
+    def _prepare_guard_approval(self, op: str, approval: dict[str, Any]) -> SignerOutcome:
         # The canonical bytes come from the one implementation in shared/. It
         # refuses an approval that names no peer, no path or no nonce, and it
         # refuses one that carries a field outside the envelope — an unsigned
@@ -689,83 +728,81 @@ class Signer:
         try:
             message = self.authz.guard_approval_message(approval)
         except self.authz.AuthzError as exc:
-            return self._refuse(
+            raise SignerRefusal(
                 f"refusing to sign this approval: {exc}. An approval names one peer, one "
                 f"protected path and one piece of content, and nothing else; a blank approval "
                 f"would be a key that signs whatever it is handed."
-            )
+            ) from exc
         # An approval whose expiry is already in the past would be signed into the
         # ledger as a valid record of something nobody can use. Refuse it instead.
         expires = str(approval["expires_at"])
         if expires < (self.clock or (lambda: datetime.now(timezone.utc)))().isoformat():
-            return self._refuse(f"refusing to sign an approval that expired at {expires}")
+            raise SignerRefusal(f"refusing to sign an approval that expired at {expires}")
 
         signature_b64 = self.authz.sign_bytes(self.key, message)
-        block = self._record(op, str(approval["peer_fingerprint"]), signature_b64)
-        # The signature travels beside the envelope, never inside it. The
-        # canonical rule covers exactly the envelope's fields and refuses an
-        # extra one, so an approval that carried its own signature would be an
-        # approval the peer refuses — signed by the Master itself.
-        return {
-            "ok": True,
-            "approval": dict(approval),
-            "signature_b64": signature_b64,
-            "ledger_block": block["hash"],
-        }
+        subject = str(approval["peer_fingerprint"])
+        return SignerOutcome(
+            subject=subject,
+            ledger_event="signature_issued",
+            ledger_payload=self._signature_issued(op, subject, signature_b64),
+            response_key="approval",
+            artifact=dict(approval),
+            # The signature travels beside the envelope, never inside it. The
+            # canonical rule covers exactly the envelope's fields and refuses an
+            # extra one, so an approval that carried its own signature would be an
+            # approval the peer refuses — signed by the Master itself.
+            extra={"signature_b64": signature_b64},
+        )
 
-    def _sign_cluster_job(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
-        job = request.get("job")
-        if not isinstance(job, dict):
-            return self._refuse("sign-cluster-job requires a 'job' object")
-
+    def _prepare_cluster_job(self, op: str, job: dict[str, Any]) -> SignerOutcome:
         # The caller may echo a signature back; the signer always rebuilds over
         # the projected fields, so a smuggled one is discarded rather than recorded.
         unsigned = {k: v for k, v in job.items() if k != "signature_b64"}
         try:
             message = self.authz.cluster_job_message(unsigned)
         except Exception as exc:
-            return self._refuse(f"cluster job is not canonicalisable: {exc}")
+            raise SignerRefusal(f"cluster job is not canonicalisable: {exc}") from exc
 
         now = (self.clock or (lambda: datetime.now(timezone.utc)))()
         if self.authz.is_expired(unsigned["expires_at"], now):
-            return self._refuse(f"refusing to sign a cluster job that expired at {unsigned['expires_at']}")
+            raise SignerRefusal(f"refusing to sign a cluster job that expired at {unsigned['expires_at']}")
 
         signature_b64 = self.authz.sign_bytes(self.key, message)
-        block = self._record(op, str(unsigned["job_id"]), signature_b64)
-        return {
-            "ok": True,
-            "job": {**unsigned, "signature_b64": signature_b64},
-            "ledger_block": block["hash"],
-        }
+        subject = str(unsigned["job_id"])
+        return SignerOutcome(
+            subject=subject,
+            ledger_event="signature_issued",
+            ledger_payload=self._signature_issued(op, subject, signature_b64),
+            response_key="job",
+            artifact={**unsigned, "signature_b64": signature_b64},
+        )
 
-    def _sign_admin_request(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
-        """Admin requests (admin-supervise) are signed the way cluster jobs are:
-        rebuilt over the canonical projection so a smuggled signature is
-        discarded, expiry is checked, and the ledger records the request_id."""
-        admin = request.get("request")
-        if not isinstance(admin, dict):
-            return self._refuse("sign-admin-request requires an 'admin-request' object")
-
+    def _prepare_admin_request(self, op: str, admin: dict[str, Any]) -> SignerOutcome:
+        """Admin requests are signed like cluster jobs: rebuilt over the canonical
+        projection so a smuggled signature is discarded, expiry is checked, and
+        the ledger records the request_id."""
         unsigned = {k: v for k, v in admin.items() if k != "signature_b64"}
         try:
             message = self.authz.admin_request_message(unsigned)
         except Exception as exc:
-            return self._refuse(f"admin request is not canonicalisable: {exc}")
+            raise SignerRefusal(f"admin request is not canonicalisable: {exc}") from exc
 
         now = (self.clock or (lambda: datetime.now(timezone.utc)))()
         if self.authz.is_expired(unsigned["expires_at"], now):
-            return self._refuse(f"refusing to sign an admin request that expired at {unsigned['expires_at']}")
+            raise SignerRefusal(f"refusing to sign an admin request that expired at {unsigned['expires_at']}")
 
         signature_b64 = self.authz.sign_bytes(self.key, message)
-        block = self._record(op, str(unsigned["request_id"]), signature_b64)
-        return {
-            "ok": True,
-            "admin_request": {**unsigned, "signature_b64": signature_b64},
-            "ledger_block": block["hash"],
-        }
+        subject = str(unsigned["request_id"])
+        return SignerOutcome(
+            subject=subject,
+            ledger_event="signature_issued",
+            ledger_payload=self._signature_issued(op, subject, signature_b64),
+            response_key="admin_request",
+            artifact={**unsigned, "signature_b64": signature_b64},
+        )
 
-    def _sign_rfi_answer(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
-        """Sign one RFI answer (contracts/rfi-schema.json) for a peer's 01_Inbox.
+    def _prepare_rfi_answer(self, op: str, answer: dict[str, Any]) -> SignerOutcome:
+        """Sign one RFI answer for a peer's 01_Inbox.
 
         The payload arrives base64-encoded because JSON cannot carry raw bytes; it
         is decoded strictly here and ``content_sha256`` is computed by
@@ -777,19 +814,15 @@ class Signer:
         An empty payload is legitimate ("nothing found"); refusing it would push a
         Master to invent content.
         """
-        answer = request.get("answer")
-        if not isinstance(answer, dict):
-            return self._refuse("sign-rfi-answer requires an 'answer' object")
-
         content_b64 = answer.get("content_b64")
         if not isinstance(content_b64, str):
-            return self._refuse(
+            raise SignerRefusal(
                 "sign-rfi-answer requires 'content_b64' (the answer payload, base64; '' is a legitimate empty answer)"
             )
         try:
             content = self.authz.decode_b64_strict(content_b64, what="rfi answer content")
         except self.authz.AuthzError as exc:
-            return self._refuse(f"rfi answer content is not valid base64: {exc}")
+            raise SignerRefusal(f"rfi answer content is not valid base64: {exc}") from exc
 
         try:
             signed = self.authz.sign_rfi_answer(
@@ -801,78 +834,56 @@ class Signer:
                 now=(self.clock or (lambda: datetime.now(timezone.utc)))(),
             )
         except self.authz.AuthzError as exc:
-            return self._refuse(f"refusing to sign this rfi answer: {exc}")
+            raise SignerRefusal(f"refusing to sign this rfi answer: {exc}") from exc
 
+        subject = str(signed["request_id"])
         signature_b64 = signed["signature_b64"]
-        block = self._record(op, str(signed["request_id"]), signature_b64)
-        return {
-            "ok": True,
-            "answer": signed,
-            "ledger_block": block["hash"],
-        }
+        return SignerOutcome(
+            subject=subject,
+            ledger_event="signature_issued",
+            ledger_payload=self._signature_issued(op, subject, signature_b64),
+            response_key="answer",
+            artifact=signed,
+        )
 
-    def _sign_share_ratification(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
-        """Sign one share ratification and record it as a Master ledger event.
-
-        The envelope is the shared projection in ``shared/sparknet-authz.py``.
-        A ratification whose 2 h deadline already passed is refused rather than
-        signed into a valid-looking record nobody can use.
-        """
-        ratification = request.get("ratification")
-        if not isinstance(ratification, dict):
-            return self._refuse("sign-share-ratification requires a 'ratification' object")
+    def _prepare_share_ratification(self, op: str, ratification: dict[str, Any]) -> SignerOutcome:
+        """Sign one share ratification and record it as a Master ledger event."""
         unsigned = {key: value for key, value in ratification.items() if key != "signature_b64"}
         try:
             self.authz.share_ratification_message(unsigned)
         except self.authz.AuthzError as exc:
-            return self._refuse(f"share ratification is not canonicalisable: {exc}")
+            raise SignerRefusal(f"share ratification is not canonicalisable: {exc}") from exc
         now = (self.clock or (lambda: datetime.now(timezone.utc)))()
         if unsigned["decision"] == "ratified" and self.authz.is_expired(unsigned["deadline"], now):
-            return self._refuse(f"refusing to ratify a share whose deadline passed at {unsigned['deadline']}")
+            raise SignerRefusal(f"refusing to ratify a share whose deadline passed at {unsigned['deadline']}")
         signed = self.authz.sign_share_ratification(unsigned, self.key)
-        self.signed_count += 1
-        block = record_event(
-            self.ledger_path,
-            self.node_id,
-            "share_ratified",
-            {
+        return SignerOutcome(
+            subject=str(unsigned["share_id"]),
+            ledger_event="share_ratified",
+            ledger_payload={
                 "share_id": unsigned["share_id"],
                 "node_id": unsigned["node_id"],
                 "grant_id": unsigned["grant_id"],
                 "decision": unsigned["decision"],
                 "signature_b64": signed["signature_b64"],
             },
-            self.root_id,
-            authz=self.authz,
-            private_key=self.key,
-            node_pubkey_b64=self.public_key_b64,
-            clock=self.clock,
+            response_key="ratification",
+            artifact=signed,
         )
-        return {"ok": True, "ratification": signed, "ledger_block": block["hash"]}
 
-    def _record_share_evidence(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
-        """Record the hash and metadata of one evidence event in the signed ledger.
-
-        The evidence file itself lives in the git review repository; the ledger
-        records only the digest and the share identities, so a clone can check the
-        file against the chain without the ledger carrying page content.
-        """
-        evidence = request.get("evidence")
-        if not isinstance(evidence, dict):
-            return self._refuse("record-share-evidence requires an 'evidence' object")
+    def _prepare_share_evidence(self, op: str, evidence: dict[str, Any]) -> SignerOutcome:
+        """Record the hash and metadata of one evidence event in the signed ledger."""
         required = ("event_type", "grant_id", "node_pair", "share_type", "content_sha256", "captured_at")
         missing = [name for name in required if not isinstance(evidence.get(name), str) or not evidence[name].strip()]
         if missing:
-            return self._refuse(f"evidence missing non-empty field(s): {', '.join(missing)}")
+            raise SignerRefusal(f"evidence missing non-empty field(s): {', '.join(missing)}")
         digest = evidence["content_sha256"]
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
-            return self._refuse("evidence content_sha256 must be 64 lowercase hex characters")
-        self.signed_count += 1
-        block = record_event(
-            self.ledger_path,
-            self.node_id,
-            "share_evidence",
-            {
+            raise SignerRefusal("evidence content_sha256 must be 64 lowercase hex characters")
+        return SignerOutcome(
+            subject=digest,
+            ledger_event="share_evidence",
+            ledger_payload={
                 "event_type": evidence["event_type"],
                 "grant_id": evidence["grant_id"],
                 "node_pair": evidence["node_pair"],
@@ -880,62 +891,43 @@ class Signer:
                 "content_sha256": digest,
                 "captured_at": evidence["captured_at"],
             },
-            self.root_id,
-            authz=self.authz,
-            private_key=self.key,
-            node_pubkey_b64=self.public_key_b64,
-            clock=self.clock,
+            extra={"content_sha256": digest},
         )
-        return {"ok": True, "ledger_block": block["hash"], "content_sha256": digest}
 
-    def _sign_trust_transition(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
+    def _prepare_trust_transition(self, op: str, transition: dict[str, Any]) -> SignerOutcome:
         """Sign a reversible trust belief and record it as a Master ledger event."""
-        transition = request.get("transition")
-        if not isinstance(transition, dict):
-            return self._refuse("sign-trust-transition requires a 'transition' object")
         unsigned = {key: value for key, value in transition.items() if key != "signature_b64"}
         try:
             self.authz.trust_transition_message(unsigned)
         except self.authz.AuthzError as exc:
-            return self._refuse(f"trust transition is not canonicalisable: {exc}")
+            raise SignerRefusal(f"trust transition is not canonicalisable: {exc}") from exc
         signed = self.authz.sign_trust_transition(unsigned, self.key)
-        self.signed_count += 1
-        block = record_event(
-            self.ledger_path,
-            self.node_id,
-            "trust_level_changed",
-            {
+        return SignerOutcome(
+            subject=str(unsigned["node_id"]),
+            ledger_event="trust_level_changed",
+            ledger_payload={
                 "node_id": unsigned["node_id"],
                 "level": unsigned["level"],
                 "previous_level": unsigned["previous_level"],
                 "reason": unsigned["reason"],
                 "signature_b64": signed["signature_b64"],
             },
-            self.root_id,
-            authz=self.authz,
-            private_key=self.key,
-            node_pubkey_b64=self.public_key_b64,
-            clock=self.clock,
+            response_key="transition",
+            artifact=signed,
         )
-        return {"ok": True, "transition": signed, "ledger_block": block["hash"]}
 
-    def _sign_distillation_run(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
+    def _prepare_distillation_run(self, op: str, run: dict[str, Any]) -> SignerOutcome:
         """Sign a distillation run record and anchor it in the Master ledger."""
-        run = request.get("run")
-        if not isinstance(run, dict):
-            return self._refuse("sign-distillation-run requires a 'run' object")
         unsigned = {key: value for key, value in run.items() if key not in {"signature_b64", "signed_at"}}
         try:
             self.authz.distillation_run_message(unsigned)
         except self.authz.AuthzError as exc:
-            return self._refuse(f"distillation run is not canonicalisable: {exc}")
+            raise SignerRefusal(f"distillation run is not canonicalisable: {exc}") from exc
         signed = self.authz.sign_distillation_run(unsigned, self.key)
-        self.signed_count += 1
-        block = record_event(
-            self.ledger_path,
-            self.node_id,
-            "distillation_run",
-            {
+        return SignerOutcome(
+            subject=str(unsigned["run_id"]),
+            ledger_event="distillation_run",
+            ledger_payload={
                 "run_id": unsigned["run_id"],
                 "dataset_id": unsigned["dataset_id"],
                 "teacher_model_id": unsigned["teacher_model_id"],
@@ -947,31 +939,98 @@ class Signer:
                 "decided_by": unsigned["decided_by"],
                 "decided_at": unsigned["decided_at"],
             },
-            self.root_id,
-            authz=self.authz,
-            private_key=self.key,
-            node_pubkey_b64=self.public_key_b64,
-            clock=self.clock,
+            response_key="run",
+            artifact=signed,
         )
-        return {"ok": True, "run": signed, "ledger_block": block["hash"]}
 
-    def _record(self, op: str, subject: str, signature_b64: str) -> dict[str, Any]:
-        self.signed_count += 1
-        return record_event(
-            self.ledger_path,
-            self.node_id,
-            "signature_issued",
-            {
-                "operation": op,
-                "subject": subject,
-                "signature_b64": signature_b64,
-            },
-            self.root_id,
-            authz=self.authz,
-            private_key=self.key,
-            node_pubkey_b64=self.public_key_b64,
-            clock=self.clock,
-        )
+
+#: The one operation catalog. Insertion order is the published SIGN_OPERATIONS
+#: order; each row names the request field, response key and ledger event while
+#: the named prepare method owns the security-sensitive policy.
+SIGNER_OPERATIONS: dict[str, SignerOperation] = {
+    "sign-registry-entry": SignerOperation(
+        name="sign-registry-entry",
+        request_field="entry",
+        request_phrase="an 'entry' object",
+        response_key="entry",
+        ledger_event="signature_issued",
+        prepare=Signer._prepare_registry_entry,
+    ),
+    "sign-registry-publication": SignerOperation(
+        name="sign-registry-publication",
+        request_field="publication",
+        request_phrase="a 'publication' object",
+        response_key="publication",
+        ledger_event="signature_issued",
+        prepare=Signer._prepare_registry_publication,
+    ),
+    "sign-guard-approval": SignerOperation(
+        name="sign-guard-approval",
+        request_field="approval",
+        request_phrase="an 'approval' object",
+        response_key="approval",
+        ledger_event="signature_issued",
+        prepare=Signer._prepare_guard_approval,
+    ),
+    "sign-cluster-job": SignerOperation(
+        name="sign-cluster-job",
+        request_field="job",
+        request_phrase="a 'job' object",
+        response_key="job",
+        ledger_event="signature_issued",
+        prepare=Signer._prepare_cluster_job,
+    ),
+    "sign-admin-request": SignerOperation(
+        name="sign-admin-request",
+        request_field="request",
+        request_phrase="an 'admin-request' object",
+        response_key="admin_request",
+        ledger_event="signature_issued",
+        prepare=Signer._prepare_admin_request,
+    ),
+    "sign-rfi-answer": SignerOperation(
+        name="sign-rfi-answer",
+        request_field="answer",
+        request_phrase="an 'answer' object",
+        response_key="answer",
+        ledger_event="signature_issued",
+        prepare=Signer._prepare_rfi_answer,
+    ),
+    "sign-share-ratification": SignerOperation(
+        name="sign-share-ratification",
+        request_field="ratification",
+        request_phrase="a 'ratification' object",
+        response_key="ratification",
+        ledger_event="share_ratified",
+        prepare=Signer._prepare_share_ratification,
+    ),
+    "record-share-evidence": SignerOperation(
+        name="record-share-evidence",
+        request_field="evidence",
+        request_phrase="an 'evidence' object",
+        response_key=None,
+        ledger_event="share_evidence",
+        prepare=Signer._prepare_share_evidence,
+    ),
+    "sign-trust-transition": SignerOperation(
+        name="sign-trust-transition",
+        request_field="transition",
+        request_phrase="a 'transition' object",
+        response_key="transition",
+        ledger_event="trust_level_changed",
+        prepare=Signer._prepare_trust_transition,
+    ),
+    "sign-distillation-run": SignerOperation(
+        name="sign-distillation-run",
+        request_field="run",
+        request_phrase="a 'run' object",
+        response_key="run",
+        ledger_event="distillation_run",
+        prepare=Signer._prepare_distillation_run,
+    ),
+}
+SIGN_OPERATIONS = tuple(SIGNER_OPERATIONS)
+OPERATIONS = SIGN_OPERATIONS + READ_OPERATIONS
 
 
 # --- transport ---------------------------------------------------------------
