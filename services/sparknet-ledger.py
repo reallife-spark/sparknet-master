@@ -74,6 +74,35 @@ MASTER_EVENTS = (
 )
 
 
+def trusted_pubkey_from_state() -> str | None:
+    """Read the operational key named by the node's trust root, if one exists.
+
+    The ledger verifier is run by operators and by the signer's preflight. A
+    ledger whose blocks are self-signed by an arbitrary key must not be called
+    valid merely because every block verifies against its own header. The trust
+    root is the local anchor; when it is absent (a development checkout) the
+    caller must supply ``--pubkey`` or explicitly accept an unpinned check.
+    """
+    import os
+
+    state = os.environ.get("SPARKNET_STATE_DIR")
+    candidates = []
+    if state:
+        candidates.append(Path(state) / "trust-root.json")
+    candidates.append(Path.home() / ".local" / "state" / "sparknet" / "master-node" / "trust-root.json")
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            document = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        value = document.get("master_pubkey") if isinstance(document, dict) else None
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def load_ledger(path: Path = LEDGER_PATH) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"ledger not found: {path}")
@@ -92,7 +121,7 @@ def block_hash(block: dict[str, Any]) -> str:
     return _load_authz().ledger_block_hash(block)
 
 
-def verify_chain(ledger: dict[str, Any]) -> tuple[bool, str]:
+def verify_chain(ledger: dict[str, Any], expected_pubkey_b64: str | None = None) -> tuple[bool, str]:
     """Walk the chain and check every link.
 
     Returns ``(ok, detail)`` rather than raising: a ledger that is merely invalid
@@ -107,6 +136,7 @@ def verify_chain(ledger: dict[str, Any]) -> tuple[bool, str]:
     if not isinstance(blocks, list):
         return False, "ledger has no blocks array"
     previous = str(ledger.get("genesis_hash", ""))
+    seen_expected = False
     for index, block in enumerate(blocks):
         if not isinstance(block, dict):
             return False, f"block {index} is not an object"
@@ -125,6 +155,14 @@ def verify_chain(ledger: dict[str, Any]) -> tuple[bool, str]:
             return False, (
                 f"block {index} ({block['block_id']}) links to {block['prev_hash']!r}, expected {previous!r}"
             )
+        if expected_pubkey_b64:
+            if block["node_pubkey_b64"] == expected_pubkey_b64:
+                seen_expected = True
+            elif seen_expected:
+                return False, (
+                    f"block {index} ({block['block_id']}) returns to an old key after the "
+                    "trusted operational key took over"
+                )
         try:
             node_pub = authz.public_key_from_b64(str(block["node_pubkey_b64"] or ""))
         except Exception as exc:
@@ -139,12 +177,14 @@ def verify_chain(ledger: dict[str, Any]) -> tuple[bool, str]:
                 f"block {index} ({block['block_id']}) has been altered: its contents do not hash to its recorded hash"
             )
         previous = block["hash"] if "hash" in block else block_hash(block)
+    if expected_pubkey_b64 and not seen_expected:
+        return False, "no block is signed by the trusted operational key"
     return True, f"{len(blocks)} block(s), chain intact"
 
 
-def describe(ledger: dict[str, Any] | None = None) -> dict[str, Any]:
+def describe(ledger: dict[str, Any] | None = None, expected_pubkey_b64: str | None = None) -> dict[str, Any]:
     data = ledger if ledger is not None else load_ledger()
-    ok, detail = verify_chain(data)
+    ok, detail = verify_chain(data, expected_pubkey_b64)
     return {
         "path": str(LEDGER_PATH),
         "blocks": len(data.get("blocks", [])),
@@ -165,11 +205,31 @@ def describe(ledger: dict[str, Any] | None = None) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     command = args[0] if args else "verify"
+    expected_pubkey_b64 = None
+    if "--pubkey" in args:
+        position = args.index("--pubkey")
+        if position + 1 >= len(args):
+            print("[ledger] --pubkey requires a value", file=sys.stderr)
+            return 2
+        expected_pubkey_b64 = args[position + 1]
+        args = args[:position] + args[position + 2 :]
     if command not in {"verify", "describe"}:
         print(f"[ledger] unknown command {command!r}; expected verify or describe", file=sys.stderr)
         return 2
+    expected_pubkey_b64 = expected_pubkey_b64 or trusted_pubkey_from_state()
+    if expected_pubkey_b64 is None:
+        try:
+            existing = load_ledger()
+        except (FileNotFoundError, ValueError):
+            existing = {"blocks": []}
+        if existing.get("blocks"):
+            print(
+                "[ledger] no pinned operational key and the ledger is non-empty; refusing an unpinned verify",
+                file=sys.stderr,
+            )
+            return 2
     try:
-        report = describe()
+        report = describe(expected_pubkey_b64=expected_pubkey_b64)
     except (FileNotFoundError, ValueError) as exc:
         print(f"[ledger] {exc}", file=sys.stderr)
         return 1

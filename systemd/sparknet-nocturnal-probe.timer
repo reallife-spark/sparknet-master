@@ -1,0 +1,14 @@
+# Probe-only timer for the nocturnal lease. It notifies; it never arms.
+
+[Unit]
+Description=Sparknet nocturnal probe timer (15 min)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+AccuracySec=30s
+Persistent=false
+Unit=sparknet-nocturnal-probe.service
+
+[Install]
+WantedBy=timers.target

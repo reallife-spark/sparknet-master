@@ -35,11 +35,16 @@ Links on this page are wikilinks so they resolve whether the page is opened as
 | `make provenance-append` | the only way to build a ledger block |
 | `make precommit` | `--strict` verification for the hook |
 | `make wiki-preflight` | prove the wiki skills resolve *this* vault |
+| `make context-check` | prove `CONTEXT.md` is current |
+| `make vault-health` | diagnose the vault; `vault-heal` for safe repairs |
 | `make help` | the full list |
 
 ## Where to start
 
+- Operating context: `CONTEXT.md` (generated)
 - Session memory: `MEMORY.md`, then `02_Daily/<today>.md`
 - Work in flight: `PLAN.md` — its `current:` field names the step
 - The rules: the role's `alpha-*.md`
+- Knowledge channels: `contracts/knowledge-flow.md`
+- Vault repair: `docs/self-healing.md`
 - The contract (single source of truth): `contracts/tracking-schema.json`

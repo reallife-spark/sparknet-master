@@ -1,0 +1,18 @@
+[Unit]
+Description=Sparknet Master task orchestrator (no authority)
+After=network-online.target sparknet-nats.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=raxxar
+EnvironmentFile=-/home/raxxar/sparknet/master-node/.env
+Environment=SPARKNET_NATS_URL=nats://10.100.0.1:4225
+ExecStart=/home/raxxar/sparknet/.venv/bin/python /home/raxxar/sparknet/master-node/services/sparknet-orchestrator.py --serve
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

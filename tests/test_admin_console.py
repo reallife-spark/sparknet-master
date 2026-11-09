@@ -542,3 +542,15 @@ def test_main_maps_positional_entity_without_the_target(monkeypatch: pytest.Monk
         "spec": "peer-2",
         "entity": {"user_id": "u9", "role": "admin"},
     }
+
+
+def test_build_entity_accepts_memory_extra_fields():
+    entity = console.build_entity(
+        "memory_read",
+        [],
+        ["user_id=user-07", "memory_query=release decision", "memory_types=episodic,semantic"],
+    )
+    assert entity["user_id"] == "user-07"
+    assert entity["memory_query"] == "release decision"
+    assert entity["memory_types"] == "episodic,semantic"
+    assert console.build_entity("memory_purge", ["mem-1,mem-2"], ["user_id=user-07"])["memory_ids"] == "mem-1,mem-2"

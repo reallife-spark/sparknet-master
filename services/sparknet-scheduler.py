@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nocturnal batch-lease scheduler — Step 9C state machine, no dispatch.
+"""Nocturnal batch-lease scheduler — Step 9C state machine and 9G dispatcher.
 
 The fleet has no RDMA and no shared GPU address space. The useful part of Step 9
 is not a pooled-memory fabric; it is a time-boxed lease over independent nodes
@@ -20,8 +20,9 @@ CLI::
     sparknet-scheduler.py status
     sparknet-scheduler.py abort --reason <text>
 
-Default is dry-run: ``plan`` dispatches nothing, ``arm`` records a lease and
-still dispatches nothing, and no verb can skip the two-step confirmation. A
+Default is dry-run: ``plan`` and ``arm`` dispatch nothing; the separate
+``dispatch`` verb requires an ARMED lease and asks the isolated signer for the
+job signature. No verb can skip the two-step confirmation. A
 missing, stale, duplicated, unreadable or revoked signal is busy, never idle.
 Design: ``master-node/plans/NOCTURNAL_BATCH_DESIGN.md``.
 """
@@ -34,8 +35,13 @@ import importlib.util
 import json
 import os
 import secrets
+import socket
+import subprocess
 import sys
 import tempfile
+import time as time_module
+import urllib.error
+import urllib.request
 from collections.abc import Sequence
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -45,6 +51,8 @@ ROLE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = ROLE_ROOT.parent
 AUTHZ_PATH = REPO_ROOT / "shared" / "sparknet-authz.py"
 IDLE_PATH = REPO_ROOT / "shared" / "sparknet-idle.py"
+CLUSTER_PATH = REPO_ROOT / "shared" / "sparknet-cluster.py"
+NOCTURNAL_PATH = REPO_ROOT / "shared" / "sparknet-nocturnal.py"
 
 SCHEMA_VERSION = "sparknet-nocturnal/1"
 STATE_SCHEMA_VERSION = "sparknet-nocturnal-state/1"
@@ -94,6 +102,14 @@ def _authz() -> Any:
 
 def _idle() -> Any:
     return _load_module(IDLE_PATH, "sparknet_scheduler_idle")
+
+
+def _cluster() -> Any:
+    return _load_module(CLUSTER_PATH, "sparknet_scheduler_cluster")
+
+
+def _nocturnal() -> Any:
+    return _load_module(NOCTURNAL_PATH, "sparknet_scheduler_nocturnal")
 
 
 def _now_iso(now: datetime | None = None) -> str:
@@ -235,6 +251,7 @@ def load_registry(path: Path, *, now: datetime | None = None) -> dict[str, Any]:
             raise SchedulerError(f"registry_not_yet_valid: {fingerprint[:12]}")
         node_id = identity.get("node_id")
         key = identity.get("wireguard_public_key_b64")
+        node_pubkey_b64 = entry.get("node_pubkey_b64")
         role = identity.get("role")
         address = _bare(entry.get("overlay_ipv4") or identity.get("overlay_ipv4"))
         if not isinstance(node_id, str) or not node_id:
@@ -258,6 +275,7 @@ def load_registry(path: Path, *, now: datetime | None = None) -> dict[str, Any]:
                 "wireguard_public_key_b64": key,
                 "overlay_ipv4": address,
                 "capabilities": sorted(caps),
+                "node_pubkey_b64": node_pubkey_b64,
             }
         )
     nodes.sort(key=lambda node: node["node_id"])
@@ -781,6 +799,263 @@ def _load_inputs(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
     }
 
 
+def _default_signer_socket() -> Path:
+    state = os.environ.get("SPARKNET_STATE_DIR", "").strip()
+    if state:
+        return Path(state) / "signer" / "signer.sock"
+    return Path.home() / ".local" / "state" / "sparknet" / "master-node" / "signer" / "signer.sock"
+
+
+def _recv_line(connection: socket.socket, max_bytes: int = 1 << 20) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = connection.recv(4096)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > max_bytes:
+            raise SchedulerError("signer_response_too_large")
+        if b"\n" in chunk:
+            break
+    return b"".join(chunks).split(b"\n", 1)[0]
+
+
+class SchedulerSigner:
+    def __init__(self, socket_path: str | Path, *, timeout: float = 30.0):
+        self.socket_path = Path(socket_path)
+        self.timeout = timeout
+
+    def call(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.socket_path.exists():
+            raise SchedulerError(f"no-signer: {self.socket_path}")
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection.settimeout(self.timeout)
+        try:
+            connection.connect(str(self.socket_path))
+            connection.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+            line = _recv_line(connection)
+        except OSError as exc:
+            raise SchedulerError(f"signer-error: {exc}") from exc
+        finally:
+            connection.close()
+        try:
+            response = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise SchedulerError("signer-protocol") from exc
+        if not isinstance(response, dict):
+            raise SchedulerError("signer-protocol")
+        return response
+
+    def root_id(self) -> str:
+        response = self.call({"op": "root-id"})
+        if not response.get("ok"):
+            raise SchedulerError(str(response.get("error") or "signer-refused"))
+        return str(response["root_id"])
+
+    def sign_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        response = self.call({"op": "sign-cluster-job", "root_id": self.root_id(), "job": job})
+        if not response.get("ok"):
+            raise SchedulerError(str(response.get("error") or "signer-refused"))
+        signed = response.get("job")
+        if not isinstance(signed, dict):
+            raise SchedulerError("signer-protocol")
+        return signed
+
+
+def _http_json(url: str, payload: dict[str, Any] | None = None, *, timeout: float = 30.0) -> tuple[int, dict[str, Any]]:
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(url, data=data, method="POST" if data is not None else "GET")
+    request.add_header("Accept", "application/json")
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8")
+            return response.status, json.loads(body) if body else {}
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", "replace")
+        try:
+            return exc.code, json.loads(raw)
+        except ValueError:
+            return exc.code, {"ok": False, "error": raw}
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        raise SchedulerError(f"http-error: {exc}") from exc
+
+
+def _master_node_id() -> str:
+    explicit = os.environ.get("SPARKNET_NODE_ID", "").strip()
+    if explicit:
+        return explicit
+    path = ROLE_ROOT / "manifests" / "master-identity.json"
+    try:
+        return str(json.loads(path.read_text(encoding="utf-8"))["node_id"])
+    except Exception as exc:
+        raise SchedulerError("master_identity_unreadable") from exc
+
+
+def _ensure_nocturnal_git(work_tree: Path, git_dir: Path) -> Path:
+    """Initialize the state-dir artifact repository on first use."""
+    if not git_dir.exists():
+        git_dir.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        subprocess.run(
+            ["git", f"--git-dir={git_dir}", f"--work-tree={work_tree}", "init", "-q"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", f"--git-dir={git_dir}", "config", "user.email", "sparknet-master@localhost"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", f"--git-dir={git_dir}", "config", "user.name", "sparknet-master"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    return git_dir
+
+
+def _dispatch(args: argparse.Namespace, now: datetime) -> int:
+    """Dispatch one signed job through the existing peer cluster ingress.
+
+    This does not grant anything. It requires an ARMED lease, asks the isolated
+    signer for a cluster-job signature, dispatches over the existing overlay
+    ingress, verifies every participant result against the registry-bound node
+    key, then writes the reduced aggregate under the Master vault.
+    """
+    state_dir = Path(args.state_dir)
+    state = load_state(state_dir)
+    if state.get("state") != "ARMED" or not isinstance(state.get("lease"), dict):
+        raise SchedulerError("no_active_lease")
+    lease = state["lease"]
+    active_lease_id = str(lease.get("lease_id") or "")
+    if not active_lease_id:
+        raise SchedulerError("lease_id_missing")
+    if args.lease_id and args.lease_id != active_lease_id:
+        raise SchedulerError("lease_id_mismatch")
+    lease_expires = parse_ts(lease.get("expires_at"))
+    if lease_expires is None or now >= lease_expires:
+        raise SchedulerError("lease_expired")
+    lease_id = active_lease_id
+    registry = load_registry(Path(args.registry), now=now)
+    nodes = registry["nodes"]
+    master_id = _master_node_id()
+    if lease.get("roster_digest") != roster_digest(nodes):
+        raise SchedulerError("roster_changed")
+    roster = sorted({master_id, *[str(node["node_id"]) for node in nodes]})
+    governance = "peer_pair" if len(roster) == 2 else "master_governed"
+    cluster = _cluster()
+    job_doc = json.loads(Path(args.job).read_text(encoding="utf-8"))
+    if isinstance(job_doc, dict) and isinstance(job_doc.get("job"), dict):
+        job_doc = job_doc["job"]
+    if not isinstance(job_doc, dict):
+        raise SchedulerError("job_malformed")
+    built = cluster.construct(job_doc, roster, governance_mode=governance)
+    signer = SchedulerSigner(args.signer_socket or _default_signer_socket())
+    signed_job = signer.sign_job(job_doc)
+    by_id = {str(node["node_id"]): node for node in nodes}
+    collected: list[dict[str, Any]] = []
+    manifests: list[dict[str, Any]] = []
+    result_docs: list[dict[str, Any]] = []
+    for assignment in built["placement"]["assignments"]:
+        node_id = assignment["node_id"]
+        if node_id == master_id:
+            raise SchedulerError("master_subtasks_not_supported")
+        node = by_id.get(node_id)
+        if node is None:
+            raise SchedulerError(f"unknown_node: {node_id}")
+        if "cluster-serve" not in node.get("capabilities", []):
+            raise SchedulerError(f"cluster_serve_missing: {node_id}")
+        if not node.get("node_pubkey_b64"):
+            raise SchedulerError(f"node_pubkey_missing: {node_id}")
+        endpoint = f"http://{_bare(node['overlay_ipv4'])}:4096"
+        status, response = _http_json(endpoint + "/v1/cluster/submit", {"job": signed_job, "lease_id": lease_id})
+        if status != 200 or not response.get("ok"):
+            reason = response.get("reason") or response.get("error") or status
+            raise SchedulerError(f"dispatch_refused: {node_id}: {reason}")
+        job_id = str(response.get("job_id") or signed_job["job_id"])
+        deadline = time_module.monotonic() + float(args.timeout)
+        record: dict[str, Any] = {}
+        while time_module.monotonic() < deadline:
+            status, record = _http_json(endpoint + f"/v1/cluster/status/{job_id}")
+            if status != 200:
+                raise SchedulerError(f"status_refused: {node_id}: {status}")
+            if record.get("status") in ("completed", "failed", "cancelled"):
+                break
+            time_module.sleep(2)
+        if record.get("status") != "completed":
+            detail = f"{record.get('status')} {record.get('error') or ''}".strip()
+            raise SchedulerError(f"job_not_completed: {node_id}: {detail}")
+        status, result_doc = _http_json(endpoint + f"/v1/cluster/result/{job_id}")
+        if status != 200 or not result_doc.get("ok"):
+            raise SchedulerError(f"result_refused: {node_id}: {status}")
+        payload = result_doc.get("result") or {}
+        results = payload.get("results") if isinstance(payload, dict) else None
+        manifest = payload.get("manifest") if isinstance(payload, dict) else None
+        if not isinstance(results, list) or not isinstance(manifest, dict):
+            raise SchedulerError(f"result_malformed: {node_id}")
+        nocturnal = _nocturnal()
+        for result in results:
+            if not nocturnal.verify_result(result, str(node["node_pubkey_b64"])):
+                raise SchedulerError(f"result_signature_invalid: {node_id}")
+        if not nocturnal.verify_manifest(manifest, str(node["node_pubkey_b64"])):
+            raise SchedulerError(f"manifest_signature_invalid: {node_id}")
+        collected.extend(results)
+        manifests.append(manifest)
+        result_docs.append(payload)
+    reduced = cluster.reduce_results(collected, [item["subtask_id"] for item in built["subtasks"]])
+    aggregate_manifest = {
+        "schema_version": _nocturnal().MANIFEST_SCHEMA,
+        "lease_id": lease_id,
+        "job_id": signed_job["job_id"],
+        "participant_node_id": master_id,
+        "subtasks": [
+            {
+                "subtask_id": result["subtask_id"],
+                "result_sha256": hashlib.sha256(
+                    (json.dumps(result, sort_keys=True, indent=2) + "\n").encode()
+                ).hexdigest(),
+                "answered": True,
+            }
+            for result in sorted(collected, key=lambda item: item["subtask_id"])
+        ],
+        "model": str(collected[0].get("model") if collected else ""),
+        "corpus_digest": None,
+        "started_at": min((result["started_at"] for result in collected), default=_now_iso(now)),
+        "ended_at": max((result["ended_at"] for result in collected), default=_now_iso(now)),
+        "coverage": reduced["coverage"],
+        "created_at": _now_iso(now),
+    }
+    if not aggregate_manifest["model"]:
+        raise SchedulerError("result_model_missing")
+    git_dir = Path(os.environ.get("SPARKNET_NOCTURNAL_GIT_DIR") or (state_dir / "nocturnal.git"))
+    _ensure_nocturnal_git(ROLE_ROOT, git_dir)
+    artifact = _nocturnal().write_aggregate(
+        ROLE_ROOT,
+        lease_id,
+        signed_job["job_id"],
+        reduced,
+        aggregate_manifest,
+        git_dir=git_dir,
+    )
+    _emit(
+        {
+            "ok": True,
+            "lease_id": lease_id,
+            "job_id": signed_job["job_id"],
+            "coverage": reduced["coverage"],
+            "artifact": artifact,
+        }
+    )
+    return 0
+
+
 def _plan(args: argparse.Namespace, now: datetime) -> int:
     state_dir = Path(args.state_dir)
     state = load_state(state_dir)
@@ -943,6 +1218,19 @@ def _arm(args: argparse.Namespace, now: datetime) -> int:
     return 0
 
 
+def _notify_status(payload: dict[str, Any]) -> None:
+    """Best-effort operator ping; the probe timer may never arm."""
+    try:
+        notify = _load_module(REPO_ROOT / "shared" / "sparknet-notify.py", "sparknet_scheduler_notify")
+        state = payload.get("state", "unknown")
+        reasons = payload.get("reasons") or []
+        body = f"nocturnal: state={state} ready={payload.get('ready')} reasons={','.join(reasons) or '-'}"
+        notify.notify_kde(body)
+    except Exception:
+        # A courtesy ping must never turn a read-only status into a failure.
+        return
+
+
 def _status(args: argparse.Namespace, now: datetime) -> int:
     state_dir = Path(args.state_dir)
     state = load_state(state_dir)
@@ -960,17 +1248,18 @@ def _status(args: argparse.Namespace, now: datetime) -> int:
     if isinstance(lease, dict):
         expires = parse_ts(lease.get("expires_at"))
         expired = expires is not None and now >= expires
-    _emit(
-        {
-            "state": state["state"],
-            "plan": state.get("plan"),
-            "lease": lease,
-            "lease_expired": expired,
-            "ready": evidence["ready"],
-            "reasons": evidence["reasons"],
-            "local_samples": len(state["local_history"]),
-        }
-    )
+    payload = {
+        "state": state["state"],
+        "plan": state.get("plan"),
+        "lease": lease,
+        "lease_expired": expired,
+        "ready": evidence["ready"],
+        "reasons": evidence["reasons"],
+        "local_samples": len(state["local_history"]),
+    }
+    _emit(payload)
+    if getattr(args, "notify", False):
+        _notify_status(payload)
     return 0
 
 
@@ -1015,7 +1304,7 @@ def _parse_now(value: str | None) -> datetime:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Nocturnal batch-lease scheduler (never dispatches)")
+    parser = argparse.ArgumentParser(description="Nocturnal batch-lease scheduler and signed job dispatcher")
     parser.add_argument("--registry", default=str(default_registry()))
     parser.add_argument("--telemetry", default=str(default_spool()))
     parser.add_argument("--snapshot", default=str(default_snapshot()))
@@ -1029,9 +1318,15 @@ def main(argv: list[str] | None = None) -> int:
     arm_parser.add_argument("--confirm", required=True)
     arm_parser.add_argument("--operator", default=None)
     arm_parser.add_argument("--reason", required=True)
-    subparsers.add_parser("status")
+    status_parser = subparsers.add_parser("status")
+    status_parser.add_argument("--notify", action="store_true", help="best-effort operator ping; never arms")
     abort_parser = subparsers.add_parser("abort")
     abort_parser.add_argument("--reason", default=None)
+    dispatch_parser = subparsers.add_parser("dispatch")
+    dispatch_parser.add_argument("--job", required=True, help="signed or unsigned cluster-job JSON")
+    dispatch_parser.add_argument("--lease-id", default=None)
+    dispatch_parser.add_argument("--signer-socket", default=None)
+    dispatch_parser.add_argument("--timeout", type=float, default=300.0)
     args = parser.parse_args(argv)
     try:
         now = _parse_now(args.now)
@@ -1043,6 +1338,8 @@ def main(argv: list[str] | None = None) -> int:
             return _status(args, now)
         if args.command == "abort":
             return _abort(args, now)
+        if args.command == "dispatch":
+            return _dispatch(args, now)
         raise SchedulerError("unknown_command")
     except SchedulerError as exc:
         _emit({"error": str(exc)})

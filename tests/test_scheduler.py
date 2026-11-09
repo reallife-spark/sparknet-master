@@ -1,4 +1,4 @@
-"""Step 9C: the scheduler is a fail-closed lease state machine, never a dispatcher."""
+"""Step 9C/9G: the scheduler is a fail-closed lease state machine and signed dispatcher."""
 
 from __future__ import annotations
 
@@ -561,9 +561,172 @@ def test_duplicate_telemetry_nonce_is_busy(tmp_path):
     assert "telemetry_replayed_nonce" in evidence["reasons"]
 
 
-def test_the_scheduler_has_no_dispatch_or_listener_surface():
+def test_the_scheduler_has_no_listener_surface_and_dispatch_is_gated():
     text = SCHEDULER.read_text()
-    assert "import socket" not in text
-    assert "subprocess" not in text
-    assert "sign_" not in text
+    # Dispatch is allowed in 9G, but the scheduler still must not listen or
+    # become a remote shell. The signer socket is the only socket operation.
+    assert "HTTPServer" not in text
+    assert "socket.bind" not in text
+    assert ".listen(" not in text
     assert "os.system" not in text
+    assert "no_active_lease" in text
+    assert "sign-cluster-job" in text
+
+
+def test_the_probe_timer_can_notify_but_never_arms() -> None:
+    service = (ROLE_ROOT / "systemd" / "sparknet-nocturnal-probe.service").read_text()
+    timer = (ROLE_ROOT / "systemd" / "sparknet-nocturnal-probe.timer").read_text()
+    makefile = (ROLE_ROOT / "Makefile").read_text()
+    exec_lines = "\n".join(line for line in service.splitlines() if line.startswith("ExecStart="))
+    assert exec_lines and "arm" not in exec_lines.lower()
+    assert " plan" not in exec_lines.lower()
+    assert "Unit=sparknet-nocturnal-probe.service" in timer
+    assert "status --notify" in makefile
+
+
+def test_dispatch_refuses_without_an_armed_lease(tmp_path: Path) -> None:
+    args = type(
+        "Args",
+        (),
+        {
+            "state_dir": str(tmp_path),
+            "registry": str(tmp_path / "registry.json"),
+            "job": str(tmp_path / "job.json"),
+            "lease_id": None,
+            "signer_socket": None,
+            "timeout": 1,
+        },
+    )()
+    with pytest.raises(scheduler.SchedulerError, match="no_active_lease"):
+        scheduler._dispatch(args, datetime(2026, 11, 4, 2, 30, tzinfo=timezone.utc))
+
+
+def test_dispatch_verifies_results_and_writes_the_aggregate(tmp_path: Path, monkeypatch) -> None:
+    import hashlib
+    import json
+
+    now = datetime(2026, 11, 4, 2, 30, tzinfo=timezone.utc)
+    master_id = "master-test"
+    peer_id = "peer-test"
+    master_root = tmp_path / "master"
+    (master_root / "manifests").mkdir(parents=True)
+    (master_root / "manifests" / "master-identity.json").write_text(json.dumps({"node_id": master_id}))
+    monkeypatch.setattr(scheduler, "ROLE_ROOT", master_root)
+    monkeypatch.setenv("SPARKNET_NODE_ID", master_id)
+
+    master_private_b64, _master_public_b64 = authz.generate_keypair()
+    peer_private_b64, peer_public_b64 = authz.generate_keypair()
+    master_key = authz.private_key_from_b64(master_private_b64)
+    peer_identity = {
+        "node_id": peer_id,
+        "role": "peer",
+        "wireguard_public_key_b64": "cGVlci13aXJlZ3VhcmQta2V5",
+        "overlay_ipv4": "10.77.0.22/32",
+        "requested_capabilities": ["cluster-serve"],
+    }
+    entry = authz.sign_authorization(
+        peer_identity,
+        master_key,
+        ["cluster-serve"],
+        now=now,
+        node_pubkey_b64=peer_public_b64,
+    )
+    registry = {
+        "schema_version": "1.0",
+        "master_public_key_b64": authz.public_key_b64(master_key.public_key()),
+        "authorizations": [entry],
+    }
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(json.dumps(registry, indent=2))
+
+    job = {
+        "job_id": "job-dispatch-1",
+        "conversation_id": "conv-1",
+        "initiator_node_id": master_id,
+        "created_at": "2026-11-04T02:00:00Z",
+        "expires_at": "2026-11-04T03:00:00Z",
+        "mode": "decompose",
+        "prompt": "say hello",
+        "subtasks": [{"node_id": peer_id, "subtask_id": "s1", "instruction": "say hello", "context_refs": []}],
+    }
+    job_path = tmp_path / "job.json"
+    job_path.write_text(json.dumps(job))
+
+    output = "hello"
+    result = {
+        "schema_version": "sparknet-nocturnal-result/1",
+        "lease_id": "lease-1",
+        "job_id": job["job_id"],
+        "subtask_id": "s1",
+        "participant_node_id": peer_id,
+        "instruction_sha256": hashlib.sha256(b"say hello").hexdigest(),
+        "output_sha256": hashlib.sha256(output.encode()).hexdigest(),
+        "model": "test-model",
+        "started_at": "2026-11-04T02:30:00Z",
+        "ended_at": "2026-11-04T02:30:01Z",
+        "coverage": {"answered": ["s1"], "missing": []},
+        "output": output,
+    }
+    nocturnal = scheduler._nocturnal()
+    signed_result = nocturnal.sign_result(result, peer_private_b64)
+    result_sha = hashlib.sha256((json.dumps(signed_result, sort_keys=True, indent=2) + "\n").encode()).hexdigest()
+    manifest = {
+        "schema_version": nocturnal.MANIFEST_SCHEMA,
+        "lease_id": "lease-1",
+        "job_id": job["job_id"],
+        "participant_node_id": peer_id,
+        "subtasks": [{"subtask_id": "s1", "result_sha256": result_sha, "answered": True}],
+        "model": "test-model",
+        "corpus_digest": None,
+        "started_at": result["started_at"],
+        "ended_at": result["ended_at"],
+        "coverage": result["coverage"],
+        "created_at": "2026-11-04T02:30:02Z",
+    }
+    signed_manifest = nocturnal.sign_manifest(manifest, peer_private_b64)
+
+    class FakeSigner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def sign_job(self, payload):
+            return {**payload, "signature_b64": "fake"}
+
+    def fake_http(url, payload=None, *, timeout=30.0):
+        if url.endswith("/v1/cluster/submit"):
+            return 200, {"ok": True, "job_id": job["job_id"], "status": "accepted"}
+        if "/status/" in url:
+            return 200, {"ok": True, "status": "completed"}
+        if "/result/" in url:
+            return 200, {"ok": True, "result": {"results": [signed_result], "manifest": signed_manifest}}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(scheduler, "SchedulerSigner", FakeSigner)
+    monkeypatch.setattr(scheduler, "_http_json", fake_http)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    state = scheduler.default_state()
+    state["state"] = "ARMED"
+    loaded = scheduler.load_registry(registry_path, now=now)
+    state["lease"] = {
+        "lease_id": "lease-1",
+        "expires_at": "2026-11-04T03:00:00Z",
+        "roster_digest": scheduler.roster_digest(loaded["nodes"]),
+    }
+    scheduler.save_state(state_dir, state, now)
+    args = type(
+        "Args",
+        (),
+        {
+            "state_dir": str(state_dir),
+            "registry": str(registry_path),
+            "job": str(job_path),
+            "lease_id": "lease-1",
+            "signer_socket": None,
+            "timeout": 5,
+        },
+    )()
+    assert scheduler._dispatch(args, now) == 0
+    aggregate = master_root / "01_Inbox" / "nocturnal" / "lease-1" / job["job_id"] / "aggregate.json"
+    assert aggregate.is_file()
+    assert json.loads(aggregate.read_text())["coverage"]["missing"] == []

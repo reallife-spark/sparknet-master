@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "contract": "identity-schema",
   "purpose": "The Master role's own identity: which node this role runs as, where it sits on the overlay, and what it holds. This is a description of the ROLE, not a grant of authority. Read the election block before concluding this node is Master.",
-  "node_id": "sparknet-node-0002",
+  "node_id": "sparknet-node-0001",
   "role": "peer",
   "role_note": "'peer' is deliberate and load-bearing, and it contradicts Step 1 of the build plan, which asked for 'role: master' here. Step 1 predates Step 13. Under the elected model a Master IS a peer that won a unanimous election, so the identity on disk says peer and carries no claim to authority; contracts/consensus-protocol.md decides who is Master, and no manifest, directory name or bundle destination may decide it. tests/test_contracts.py::test_a_node_declares_itself_peer_until_it_is_elected fails this file if it drifts to 'master'. What 'master' names here is the ROLE this subvault implements \u2014 the node that signs \u2014 and that is recorded in role_implemented_by rather than in the identity.",
   "role_implemented_by": "master-node \u2014 the subvault implementing the signing role. A description of scope, not a grant.",

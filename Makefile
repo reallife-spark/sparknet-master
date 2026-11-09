@@ -36,10 +36,10 @@ LEVEL ?=
 REASON ?=
 
 .PHONY: help env-init validate status plan test test-all lint spec-check \
-        env-show parity ledger evidence-capture review-agents keygen keys-check units units-check \
-        signer signer-unit reflex-unit peer-intake-unit wg-observer-unit console \
-        provenance-verify user-init provenance-append ingest precommit shims-check \
-        bundle wiki-preflight wiki-status wiki-lint wiki-query skills-sync skills-check clean
+        env-show parity ledger evidence-capture review-agents keygen keys-check units units-check step89-admin \
+        signer signer-unit reflex-unit peer-intake-unit rfi-responder-unit wg-observer-unit nocturnal-probe-unit console vault-health vault-heal \
+        provenance-verify user-init provenance-append ingest precommit shims-check context-pack context-check governance-check \
+        bundle wiki-preflight wiki-status wiki-lint wiki-query skills-sync skills-check vector-reindex vector-serve uplift-intake uplift-intake-unit uplift-intake-check distill distill-doctor distill-trainer-help distill-dataset distill-run distill-status file-share-serve nat-status-serve share-ratify-unit share-ratify-serve share-ratify-list share-ratify-approve share-ratify-refuse clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -51,8 +51,90 @@ env-init: ## Write this role's .env + wiki dirs from .env.example (idempotent)
 env-show: ## Print the paths this role resolves (vault, peer node, state dir)
 	@"$(VAULT_ROOT)/scripts/sparknet-master-env.sh"
 
+VECTOR_PY ?= $(FABRIC_ROOT)/.venv-vector/bin/python
+VECTOR_STATE ?= $(HOME)/.local/state/sparknet/master-node/vector
+QDRANT_URL ?= http://127.0.0.1:6333
+
+RATIFY_STATE ?= $(HOME)/.local/state/sparknet/master-node/share-ratify/queue.json
+RATIFY_KEYS ?= $(HOME)/.local/state/sparknet/master-node/share-keys
+SIGNER_SOCKET ?= $(HOME)/.local/state/sparknet/master-node/signer/signer.sock
+
+share-ratify-unit: ## Render the 4203 queue unit to stdout (stage only; never enables)
+	@$(ROLE_ROOT)/scripts/sparknet-share-ratify-unit.sh
+
+share-ratify-serve: ## Run the 4203 queue in the foreground (needs RATIFY_KEYS)
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-share-ratify.py" --serve --bind "$${SPARKNET_RATIFY_BIND:-127.0.0.1}" --port "$${SPARKNET_RATIFY_PORT:-4203}" --state "$(RATIFY_STATE)" --registry "$(ROLE_ROOT)/manifests/node-authorizations.json" --trusted-key-dir "$(RATIFY_KEYS)"
+
+share-ratify-list: ## Print the 4203 pending/decided queue
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-share-ratify.py" --list --state "$(RATIFY_STATE)"
+
+share-ratify-approve: ## Approve one queued share (SHARE_ID=...; signs through the signer)
+	@test -n "$(SHARE_ID)" || { echo "SHARE_ID required" >&2; exit 2; }
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-share-ratify.py" --state "$(RATIFY_STATE)" --signer-socket "$(SIGNER_SOCKET)" --approve "$(SHARE_ID)"
+
+share-ratify-refuse: ## Refuse one queued share (SHARE_ID=...; signs through the signer)
+	@test -n "$(SHARE_ID)" || { echo "SHARE_ID required" >&2; exit 2; }
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-share-ratify.py" --state "$(RATIFY_STATE)" --signer-socket "$(SIGNER_SOCKET)" --refuse "$(SHARE_ID)"
+
+vector-reindex: ## Rebuild sparknet-fabric and sparknet-shared in the 4223 Qdrant store
+	@test -x "$(VECTOR_PY)" || { echo "vector-reindex: $(VECTOR_PY) missing (make vector-dev in a separate venv)"; exit 2; }
+	@SPARKNET_QDRANT_URL="$(QDRANT_URL)" $(VECTOR_PY) "$(FABRIC_ROOT)/scripts/sparknet-vector.py" fabric index --vault "$(FABRIC_ROOT)" --data-dir "$(VECTOR_STATE)/fabric"
+	@SPARKNET_QDRANT_URL="$(QDRANT_URL)" $(VECTOR_PY) "$(FABRIC_ROOT)/scripts/sparknet-vector.py" shared index --vault "$(ROLE_ROOT)" --data-dir "$(VECTOR_STATE)/shared"
+
+vector-serve: ## Run the signed 4223 listener in the foreground (needs VECTOR_PY/key)
+	@test -x "$(VECTOR_PY)" || { echo "vector-serve: $(VECTOR_PY) missing"; exit 2; }
+	@SPARKNET_QDRANT_URL="$(QDRANT_URL)" $(VECTOR_PY) "$(ROLE_ROOT)/services/sparknet-vector-serve.py" --fabric-vault "$(FABRIC_ROOT)" --shared-vault "$(ROLE_ROOT)" --state-root "$(VECTOR_STATE)" --registry "$(ROLE_ROOT)/manifests/node-authorizations.json" --bind "$${SPARKNET_VECTOR_BIND:-127.0.0.1}" --port "$${SPARKNET_VECTOR_PORT:-4223}" --trusted-key "$${SPARKNET_VECTOR_TRUSTED_KEY:?set NODE_ID=PATH}"
+
+UPLIFT_STATE ?= /srv/sparknet/uplift
+DISTILL_STATE ?= /srv/sparknet/distill
+DISTILL_CONFIG ?= $(ROLE_ROOT)/configs/distill.json
+
+uplift-intake: ## Run the signed 8091 uplift intake in the foreground (no key, no signer)
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-uplift-intake.py" --serve --bind "$${SPARKNET_UPLIFT_BIND:-127.0.0.1}" --port "$${SPARKNET_UPLIFT_PORT:-8091}" --state "$(UPLIFT_STATE)" --registry "$(ROLE_ROOT)/manifests/node-authorizations.json" --trusted-key "$${SPARKNET_UPLIFT_TRUSTED_KEY:?set NODE_ID=PATH}"
+
+uplift-intake-unit: ## Stage the 8091 uplink unit ONLY (never enables it)
+	@install -Dm644 "$(VAULT_ROOT)/systemd/sparknet-uplift-intake.service" "$(UNIT_DIR)/sparknet-uplift-intake.service"
+	@echo "  ✓ staged sparknet-uplift-intake.service into $(UNIT_DIR) — not enabled"
+
+uplift-intake-check: ## Validate the 8091 registry/keyring without listening
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-uplift-intake.py" --check --state "$(UPLIFT_STATE)" --registry "$(ROLE_ROOT)/manifests/node-authorizations.json" --trusted-key "$${SPARKNET_UPLIFT_TRUSTED_KEY:?set NODE_ID=PATH}"
+
+distill-trainer-help: ## Show the LoRA trainer launcher contract
+	@$(ROLE_ROOT)/scripts/sparknet-distill-trainer.sh --help
+
+distill-doctor: ## Check the GPU/trainer prerequisites for a distillation run
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-distill.py" doctor --config "$(DISTILL_CONFIG)" --state "$(DISTILL_STATE)"
+
+distill-dataset: ## Build a same-family distillation dataset from uplifted traces
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-distill.py" dataset --config "$(DISTILL_CONFIG)" --state "$(DISTILL_STATE)" --uplift "$(UPLIFT_STATE)"
+
+distill-status: ## Write the sanitized distillation status snapshot for the WebUI
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-distill-status.py" --config "$(DISTILL_CONFIG)" --state "$(DISTILL_STATE)" --out "$(ROLE_ROOT)/.state/webui/distill-status.json" --share-out /srv/sparknet/share/learning/status.json
+
+distill: ## Show the run scaffold (operator-triggered; no training by default)
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-distill.py" run --config "$(DISTILL_CONFIG)" --state "$(DISTILL_STATE)" --uplift "$(UPLIFT_STATE)"
+
+distill-run: ## Train a configured teacher->student candidate (requires DISTILL_EXECUTE=1)
+	@test "$${DISTILL_EXECUTE:-0}" = "1" || { echo "distill-run: set DISTILL_EXECUTE=1 and SPARKNET_DISTILL_TRAINER"; exit 2; }
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-distill.py" run --execute --sign --config "$(DISTILL_CONFIG)" --state "$(DISTILL_STATE)" --uplift "$(UPLIFT_STATE)"
+
+file-share-serve: ## Run the read-only 4221 file share (needs a trusted peer key)
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-file-share.py" --root "$${SPARKNET_SHARE_ROOT:-/srv/sparknet/share}" --registry "$(ROLE_ROOT)/manifests/node-authorizations.json" --bind "$${SPARKNET_SHARE_BIND:-127.0.0.1}" --port "$${SPARKNET_SHARE_PORT:-4221}" --trusted-key "$${SPARKNET_SHARE_TRUSTED_KEY:?set NODE_ID=PATH}"
+
+nat-status-serve: ## Run the read-only 4222 NAT status/dry-run surface
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-nat-status.py" --registry "$(ROLE_ROOT)/manifests/node-authorizations.json" --bind "$${SPARKNET_NAT_BIND:-127.0.0.1}" --port "$${SPARKNET_NAT_PORT:-4222}" --trusted-key "$${SPARKNET_NAT_TRUSTED_KEY:?set NODE_ID=PATH}"
+
+context-pack: ## Regenerate this role's CONTEXT.md
+	@$(PY) $(FABRIC_ROOT)/scripts/sparknet-context-pack.py --root "$(VAULT_ROOT)" --role master
+
+governance-check: ## Enforce the five-file shape and budgets
+	@$(PY) $(FABRIC_ROOT)/scripts/sparknet-governance-check.py
+
+context-check: ## Fail if this role's CONTEXT.md is stale
+	@$(PY) $(FABRIC_ROOT)/scripts/sparknet-context-pack.py --root "$(VAULT_ROOT)" --role master --check
+
 validate: ## Charter, plan, executables wired, and parity with the peer
-	@for f in AGENTS.md MEMORY.md MISSION.md INTENT.md plans/MASTER_BUILD_PLAN.md \
+	@for f in AGENTS.md CONTEXT.md MEMORY.md MISSION.md INTENT.md PLAN.md \
 	          configs/wireguard/master-peer.template security/key-management.md; do \
 		  [ -f "$(VAULT_ROOT)/$$f" ] || { echo "missing $$f" >&2; exit 1; }; \
 	done
@@ -67,20 +149,20 @@ validate: ## Charter, plan, executables wired, and parity with the peer
 	@$(MAKE) --no-print-directory ledger        >/dev/null && echo "  ✓ master ledger: chain verifies"
 
 status: ## Where the build plan stands
-	@grep -m1 '^current:' "$(VAULT_ROOT)/plans/MASTER_BUILD_PLAN.md" \
-	  || { echo "MASTER_BUILD_PLAN.md has no 'current:' cursor" >&2; exit 1; }
+	@grep -m1 '^current:' "$(VAULT_ROOT)/PLAN.md" \
+	  || { echo "PLAN.md has no 'current:' cursor" >&2; exit 1; }
 	@printf '\n  steps done: %s of %s\n' \
-	  "$$(grep -c '^- \[x\]' "$(VAULT_ROOT)/plans/MASTER_BUILD_PLAN.md")" \
-	  "$$(grep -c '^- \[ \]' "$(VAULT_ROOT)/plans/MASTER_BUILD_PLAN.md")"
+	  "$$(grep -c '^- \[x\]' "$(VAULT_ROOT)/PLAN.md")" \
+	  "$$(grep -c '^- \[ \]' "$(VAULT_ROOT)/PLAN.md")"
 
 # Prints the block for whichever step the `current:` cursor points at.
 plan: ## Print the active plan step with its DoD
-	@cursor="$$(grep -m1 '^current:' "$(VAULT_ROOT)/plans/MASTER_BUILD_PLAN.md" \
+	@cursor="$$(grep -m1 '^current:' "$(VAULT_ROOT)/PLAN.md" \
 	           | sed 's/.*current:[[:space:]]*//')"; \
 	if [ "$$cursor" = "done" ]; then echo "plan is terminal: current: done"; exit 0; fi; \
 	awk -v want="$$cursor" \
 	  '/^## Step /{ inside = (index($$0, "Step " want) > 0) } \
-	   inside { print }' "$(VAULT_ROOT)/plans/MASTER_BUILD_PLAN.md"
+	   inside { print }' "$(VAULT_ROOT)/PLAN.md"
 
 spec-check: ## Assert the spec/impl boundary has not rotted
 	@$(PY) -m pytest "$(VAULT_ROOT)/tests" -q
@@ -93,6 +175,9 @@ ledger: ## Verify the master's hash-chained ledger
 
 evidence-capture: ## Capture one evidence event from EVENT (JSON file, - for stdin)
 	@$(PY) "$(VAULT_ROOT)/services/sparknet-evidence-capture.py" --event "$(EVENT)"
+
+step89-admin: ## Compose/apply signed Step 89 writes (lake, collab, distill, packages)
+	@$(PY) "$(VAULT_ROOT)/services/sparknet-step89-admin.py" $(ARGS)
 
 review-agents: ## Review EVENT, or emit a trust transition (TRUST_NODE= LEVEL= REASON=)
 	@$(PY) "$(VAULT_ROOT)/services/sparknet-review-agents.py" --event "$(EVENT)" \
@@ -119,16 +204,25 @@ REFLEX_UNIT := sparknet-reflex-broker.service
 # enabled, like the signer and reflex broker: a peer-facing socket on the
 # authority-plane node is an operator's decision to bring up.
 PEER_INTAKE_UNIT := sparknet-peer-intake.service
+RFI_RESPONDER_UNIT := sparknet-rfi-responder.service
 # The root WireGuard observer is staged with its timer, not enabled: a root
 # one-minute timer is an operator decision and Step 9G owns the live window.
 WG_OBSERVER_UNITS := sparknet-wg-observer.service sparknet-wg-observer.timer
 WG_OBSERVER_SHIM := $(SHIM_DIR)/sparknet-wg-observer
+NOCTURNAL_PROBE_UNITS := sparknet-nocturnal-probe.service sparknet-nocturnal-probe.timer
+NOCTURNAL_PROBE_SHIM := $(SHIM_DIR)/sparknet-nocturnal-probe
 # The delivery service must NOT be enabled with --now: its first run would push
 # to whatever peers exist at install time, and a single unreachable peer (a
 # normal condition) would make `make units` fail. The timer owns the schedule;
 # the service is pulled in by it.
 REGISTRY_UNITS := sparknet-registry-deliver.service sparknet-registry-deliver.timer
 REGISTRY_TIMER := sparknet-registry-deliver.timer
+# The task orchestrator is staged but not enabled: it is a new event-plane
+# service and goes live only in the Step 89 rollout window.
+ORCHESTRATOR_UNIT := sparknet-orchestrator.service
+# The private image registry is staged, not enabled: it needs an operator-created
+# token and is loopback-only.
+CONTAINER_REGISTRY_UNIT := sparknet-container-registry.service
 UNIT_DIR ?= /etc/systemd/system
 # The overlay anchor and the firewall run as root and need a stable absolute path
 # to the vault, so they are launched through generated shims (same convention as
@@ -143,7 +237,7 @@ FIREWALL_SCRIPT := $(PEER_NODE_DIR)/scripts/sparknet-firewall.sh
 FIREWALL_SHIM := $(SHIM_DIR)/sparknet-master-firewall
 
 units: ## Install + enable this role's units (needs root; set UNIT_DIR to stage only)
-	@for u in $(UNITS) $(REGISTRY_UNITS); do \
+	@for u in $(UNITS) $(REGISTRY_UNITS) $(ORCHESTRATOR_UNIT); do \
 	  install -Dm644 "$(VAULT_ROOT)/systemd/$$u" "$(UNIT_DIR)/$$u" || exit 1; \
 	done
 	@echo "  ✓ staged $(UNITS) into $(UNIT_DIR)"
@@ -151,7 +245,7 @@ units: ## Install + enable this role's units (needs root; set UNIT_DIR to stage 
 	  install -d "$(SHIM_DIR)"; \
 	  { echo '#!/bin/sh'; \
 	    echo '# Generated by master-node/Makefile — do not edit.'; \
-	    printf 'exec %s "$@"\n' '$(VAULT_ROOT)/scripts/sparknet-master-wireguard-anchor.sh'; \
+	    printf 'exec %s "$$@"\n' '$(VAULT_ROOT)/scripts/sparknet-master-wireguard-anchor.sh'; \
 	  } > "$(WG_ANCHOR_SHIM)"; \
 	  chmod +x "$(WG_ANCHOR_SHIM)"; \
 	  echo "  ✓ wrote $(WG_ANCHOR_SHIM)"; \
@@ -159,7 +253,7 @@ units: ## Install + enable this role's units (needs root; set UNIT_DIR to stage 
 	    echo '# Generated by master-node/Makefile — do not edit.'; \
 	    echo '# Runs the PEER role firewall by path: a Master is a peer that won an'; \
 	    echo '# election and keeps one implementation, exactly as it loads the peer services.'; \
-	    printf 'exec %s "$@"\n' '$(FIREWALL_SCRIPT)'; \
+	    printf 'exec %s "$$@"\n' '$(FIREWALL_SCRIPT)'; \
 	  } > "$(FIREWALL_SHIM)"; \
 	  chmod +x "$(FIREWALL_SHIM)"; \
 	  echo "  ✓ wrote $(FIREWALL_SHIM)"; \
@@ -183,11 +277,31 @@ signer: ## Print the signer's isolation posture (no key, no root, no socket)
 signer-unit: ## Stage the signer unit ONLY (does not enable it; election does that)
 	@install -Dm644 "$(VAULT_ROOT)/systemd/$(SIGNER_UNIT)" "$(UNIT_DIR)/$(SIGNER_UNIT)"
 
+container-registry-unit: ## Stage the private registry unit ONLY (does not enable it)
+	@install -Dm644 "$(VAULT_ROOT)/systemd/$(CONTAINER_REGISTRY_UNIT)" "$(UNIT_DIR)/$(CONTAINER_REGISTRY_UNIT)"
+	@echo "  ✓ staged $(CONTAINER_REGISTRY_UNIT) into $(UNIT_DIR) — not enabled."
+	@echo "    Create \$$SPARKNET_STATE_DIR/registry-token (0600) before starting it."
+
 reflex-unit: ## Stage the reflex broker unit ONLY (does not enable it; 64F does)
 	@install -Dm644 "$(VAULT_ROOT)/systemd/$(REFLEX_UNIT)" "$(UNIT_DIR)/$(REFLEX_UNIT)"
 	@echo "  ✓ staged $(SIGNER_UNIT) into $(UNIT_DIR) — not enabled."
 	@echo "    It will refuse to start until SPARKNET_NODE_ID and"
 	@echo "    \$$SPARKNET_STATE_DIR/trust-root.json name this node as Master."
+
+vault-health: ## Diagnose the vault (read-only; writes 00_System/vault-health.json)
+	@$(PY) $(FABRIC_ROOT)/scripts/sparknet-vault-health.py --root "$(VAULT_ROOT)"
+
+vault-heal: ## Safe derived repairs only
+	@$(PY) $(FABRIC_ROOT)/scripts/sparknet-vault-health.py --root "$(VAULT_ROOT)" --repair
+
+rfi-respond: ## Answer queued RFI requests once (OFFLINE=1 for a test; DRY_RUN=1 to print)
+	@$(PY) "$(VAULT_ROOT)/services/sparknet-rfi-responder.py" --once \
+	  $(if $(OFFLINE),--offline) $(if $(DRY_RUN),--dry-run) $(if $(URL),--url "$(URL)") \
+	  $(if $(REGISTRY),--registry "$(REGISTRY)") $(if $(JSON),--json)
+
+rfi-responder-unit: ## Stage the RFI responder unit ONLY (does not enable it)
+	@install -Dm644 "$(VAULT_ROOT)/systemd/$(RFI_RESPONDER_UNIT)" "$(UNIT_DIR)/$(RFI_RESPONDER_UNIT)"
+	@echo "  ✓ staged $(RFI_RESPONDER_UNIT) into $(UNIT_DIR) — not enabled."
 
 peer-intake-unit: ## Stage the peer-intake (8090) unit ONLY (does not enable it)
 	@install -Dm644 "$(VAULT_ROOT)/systemd/$(PEER_INTAKE_UNIT)" "$(UNIT_DIR)/$(PEER_INTAKE_UNIT)"
@@ -203,7 +317,7 @@ wg-observer-unit: ## Stage the root WG observer + timer ONLY (does not enable th
 	  install -d "$(SHIM_DIR)"; \
 	  { echo '#!/bin/sh'; \
 	    echo '# Generated by master-node/Makefile — do not edit.'; \
-	    printf 'exec %s "$@"\n' '$(VAULT_ROOT)/services/sparknet-wg-observer.py'; \
+	    printf 'exec %s "%s" "$$@"\n' '$(PY)' '$(VAULT_ROOT)/services/sparknet-wg-observer.py'; \
 	  } > "$(WG_OBSERVER_SHIM)"; \
 	  chmod +x "$(WG_OBSERVER_SHIM)"; \
 	  echo "  ✓ wrote $(WG_OBSERVER_SHIM)"; \
@@ -477,6 +591,24 @@ scheduler: ## Nocturnal scheduler CLI (ARGS='plan|arm ...|status|abort ...'; def
 
 scheduler-status: ## Show the nocturnal lease state and current readiness
 	@$(PY) "$(VAULT_ROOT)/services/sparknet-scheduler.py" status
+
+nocturnal-probe-unit: ## Stage the probe-only nocturnal service + timer (does not enable)
+	@for u in $(NOCTURNAL_PROBE_UNITS); do \
+	  install -Dm644 "$(VAULT_ROOT)/systemd/$$u" "$(UNIT_DIR)/$$u" || exit 1; \
+	done
+	@if [ "$(UNIT_DIR)" = "/etc/systemd/system" ]; then \
+	  install -d "$(SHIM_DIR)"; \
+	  { echo '#!/bin/sh'; \
+	    echo '# Generated by master-node/Makefile — do not edit.'; \
+	    echo 'set -a'; \
+	    echo '. "$(VAULT_ROOT)/.env" 2>/dev/null || true'; \
+	    echo 'set +a'; \
+	    printf 'exec %s "%s" status --notify "$$@"\n' '$(PY)' '$(VAULT_ROOT)/services/sparknet-scheduler.py'; \
+	  } > "$(NOCTURNAL_PROBE_SHIM)"; \
+	  chmod +x "$(NOCTURNAL_PROBE_SHIM)"; \
+	  echo "  ✓ wrote $(NOCTURNAL_PROBE_SHIM)"; \
+	fi
+	@echo "  ✓ staged $(NOCTURNAL_PROBE_UNITS) into $(UNIT_DIR) — not enabled."
 
 # --- Step 10: share ratification ---
 .PHONY: share-ratify

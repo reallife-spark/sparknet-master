@@ -1,0 +1,46 @@
+{
+  "schema": "sparknet-model-runtime/1",
+  "role": "master",
+  "node": "agx64",
+  "description": "The Master's on-demand teacher runtime. The 64 GB Master host holds the teacher; the peer holds the student. A teacher is a warm lease, not a per-request cold start, and the Master does not use it to run user chat.",
+  "defaults": {
+    "idle_stop_minutes": 45,
+    "min_free_gb": 40,
+    "health_timeout_seconds": 180,
+    "memory_safety_gb": 4
+  },
+  "profiles": {
+    "teacher": {
+      "model_id": "qwen3.6-35b-a3b-q4-k-m",
+      "compose_file": "master-node/configs/model-runtime/docker-compose.teacher.yml",
+      "project": "sparknet-teacher",
+      "profile": "teacher",
+      "services": [
+        "teacher"
+      ],
+      "model_env": "TEACHER_MODEL_FILE",
+      "memory_gb": 23,
+      "health_url": "http://127.0.0.1:8100/health",
+      "idle_stop_minutes": 45,
+      "conflicts": [
+        "teacher-reference"
+      ]
+    },
+    "teacher-reference": {
+      "model_id": "qwen3.6-35b-a3b-q8",
+      "compose_file": "master-node/configs/model-runtime/docker-compose.teacher.yml",
+      "project": "sparknet-teacher",
+      "profile": "teacher",
+      "services": [
+        "teacher"
+      ],
+      "model_env": "TEACHER_MODEL_FILE",
+      "memory_gb": 40,
+      "health_url": "http://127.0.0.1:8100/health",
+      "idle_stop_minutes": 30,
+      "conflicts": [
+        "teacher"
+      ]
+    }
+  }
+}

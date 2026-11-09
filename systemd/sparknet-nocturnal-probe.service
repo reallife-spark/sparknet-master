@@ -1,0 +1,20 @@
+# Nocturnal probe: read the lease state and notify the operator.
+#
+# This unit may never arm a lease. It runs `scheduler status --notify`, which is
+# read-only, and the timer has no path to `plan` or `arm`. Enabling the timer is
+# an operator decision; `make nocturnal-probe-unit` stages it without enabling.
+
+[Unit]
+Description=Sparknet nocturnal probe (status + notify; never arms)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=raxxar
+Group=raxxar
+ExecStart=/usr/local/libexec/sparknet/sparknet-nocturnal-probe
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes

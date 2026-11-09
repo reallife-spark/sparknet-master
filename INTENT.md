@@ -3,101 +3,88 @@ title: sparknet master-node — INTENT
 role: master
 template: true
 intent: design-contract
-updated: 2026-10-29
+updated: 2026-10-31
 ---
 
 # sparknet master-node — INTENT
 
-This page states how the Master role is meant to work and what must remain true
-on every deployment. It is not a plan, a runbook or a status page.
-`plans/MASTER_BUILD_PLAN.md` is the work order; `MISSION.md` is why the role
-exists and declares its machine-readable build status; `AGENTS.md` is the
-operating charter.
+How the Master role is meant to work and what must remain true on every
+deployment. `PLAN.md` is the work order; `MISSION.md` is why the role exists;
+`AGENTS.md` is the operating charter.
 
 ## A Master is a peer that won an election
 
-There is no separate Master species. Every member of a cluster runs the same
-peer services and holds the same capability vocabulary. One member additionally
-holds the operational key and signs. A node becomes Master because the members
-ran the election ceremony and a unanimous signed cluster trust root named it —
-not because a file on disk says so.
-
-That is why this role loads the peer's services by path instead of carrying its
-own copies, and why `manifests/master-identity.json` keeps `role: peer` until the
-ceremony makes it otherwise.
-
+There is no separate Master species. Every member runs the same peer services;
+one additionally holds the operational key and signs. A node becomes Master
+because a unanimous signed cluster trust root named it — not because a file,
+directory or prompt says so. That is why this role loads the peer's services by
+path and why its identity manifest stays `role: peer` until the ceremony.
 ## Invariants
 
-1. **Authority is key possession.** The capability vocabulary governs what a
-   peer may do; the operational key governs what the Master can authorise. A
-   peer holding every capability without that key can never grant, revoke or
-   escalate.
-2. **Three keys, three jobs.** The cluster key helps form a trust root, the
-   identity key signs the node's own authorization envelope, and the operational
-   key signs registry entries and approvals. They are distinct on purpose; one
-   key doing all three would make every node a Master-in-waiting.
+1. **Authority is key possession.** The vocabulary governs what a peer may do;
+   the key governs what the Master can authorise. A peer with every capability
+   but no key can never grant, revoke or escalate.
+2. **Three keys, three jobs.** The cluster key forms a trust root, the identity
+   key signs the node's envelope, the operational key signs registry entries and
+   approvals. One key doing all three makes every node a Master-in-waiting.
 3. **The operational key lives in one process.** Only the isolated signer loads
-   it. The signer exposes a unix socket, not a TCP port, signs only canonical
-   bytes authorised by a valid trust root, and shares no volume or network
-   namespace with the peer services.
-4. **Isolation is structural, not policy.** The admin surface is an LLM
-   application that reads configuration as input. It is separated from the key by
-   filesystem and namespace boundaries; a permission rule is not the control.
-5. **Registry authority is signature, not file presence.** An entry is
-   authoritative only when its signature verifies under the trust root and the
-   entry is well-formed, unexpired and unrevoked. Writing a file does not put a
-   node in the registry.
+   it; it exposes a unix socket, signs only canonical typed operations under a
+   valid trust root, and shares no namespace with the peer services.
+4. **Isolation is structural, not policy.** The admin surface reads
+   configuration as input; filesystem and namespace boundaries separate it from
+   the key. A permission rule is not the control.
+5. **Registry authority is signature, not file presence.** An entry counts only
+   when its signature verifies under the trust root and it is well-formed,
+   unexpired and unrevoked.
 6. **Revocation is immediate.** A revoked peer becomes inert without its
-   cooperation: the Master stops signing for it and removes it from its own
-   overlay.
-7. **One copy of the peer's services.** The Master loads `../peer-node/services/`
-   by path. A second copy would drift and produce signatures that verify on one
-   node and fail on another.
-8. **Specification is not implementation.** Tested code is not a deployed
+   cooperation: the Master stops signing for it and removes it from its overlay.
+7. **Knowledge and authority stay separate.** The Master may send a signed,
+   scoped RFI answer, a share ratification, a registry publication or an
+   approval. Only the RFI answer may carry knowledge, and it lands in
+   `01_Inbox/` as data. Telemetry, admin requests and registry entries are never
+   knowledge. See `../contracts/knowledge-flow.md`.
+8. **One copy of the peer's services.** Load `../peer-node/services/` by path.
+   A copy would drift and produce signatures that verify on one node and fail on
+   another.
+9. **Specification is not implementation.** Tested code is not a deployed
    service. Live claims are dated and host-specific; unbuilt components are
    marked unbuilt.
+10. **The Master does not run a user's node.** It supplies authority and scoped
+    knowledge; it does not choose a prompt, run a model or write a vault.
 
 ## First deployment
 
-A fresh Master is expected to run from its first boot:
+1. `make env-init` writes `.env` and the numbered skeleton; `make user-init`
+   creates the user key once.
+2. `make keygen` creates the cluster, operational and identity keys at 0600;
+   the election forms a signed root naming this node.
+3. `make signer-unit` stages the signer; only the election may enable it.
+4. `make validate`, `make parity`, `make ledger` and `make keys-check` prove the
+   surface, parity, empty ledger and key hygiene. The registry starts empty and
+   fail-closed.
 
-1. `make env-init` writes the role `.env` and numbered vault skeleton.
-2. `make user-init` creates the user key and fills `00_System/user.md` once.
-3. `make keygen` creates the cluster, operational and identity keys in the state
-   directory at 0600.
-4. The election ceremony forms a signed cluster trust root naming this node.
-5. `make signer-unit` stages the signer unit; only the election may enable it.
-6. `make validate`, `make parity`, `make ledger` and `make keys-check` prove the
-   role surface, peer-service resolution, empty ledger and key hygiene.
-7. The registry starts empty and fail-closed. No peer holds privileges until the
-   Master signs a grant.
-
-A fresh Master with no election is a peer with a vote, not an authority. Nothing
-in this vault may claim otherwise.
+A fresh Master with no election is a peer with a vote, not authority.
 
 ## AI operating model
 
-- Read `AGENTS.md`, `MISSION.md`, `INTENT.md`, `MEMORY.md` and today's session
-  file before acting.
-- Read `00_System/alpha-admin.md` for the write, signing and secret-handling
-  discipline.
-- Read the ledger as evidence, not a summary of evidence.
-- No agent signs. `cluster-admin`, `evidence-reviewer` and `registry-keeper`
-  compose signature requests for an operator; they do not hold or reach the key.
-- Never claim live signer, election, overlay or admin-surface behaviour from a
-  development host. Those are target-host checks.
+- Read `CONTEXT.md`, `AGENTS.md`, `MISSION.md`, `INTENT.md`, `MEMORY.md` and
+  today's session file before acting; read `00_System/alpha-admin.md` for the
+  write, signing and secret discipline.
+- Read the ledger as evidence, not a summary. No agent signs:
+  `cluster-admin`, `evidence-reviewer` and `registry-keeper` compose requests
+  for an operator and cannot reach the key.
+- Answer an RFI only within its scope and from the allow-listed fabric corpus;
+  prefer "nothing found" to invention.
+- Never claim live signer, election, overlay or admin-surface behaviour here.
 
 ## Blank-slate rule
 
-A production Master starts with empty vault categories, its identity pages, the
+A production Master starts with empty categories, its identity pages, the
 governance set and its role code. It does not inherit another Master's root id,
-host names, sessions or live claims. Deployment-specific state belongs in
-`manifests/`, `plans/`, `MEMORY.md`, `log.md` and `02_Daily/`, not in
-`INTENT.md`. `MISSION.md` keeps the machine-readable build status the tests
-require; narrative status lives in `plans/MASTER_BUILD_PLAN.md`.
+host names, sessions or live claims. Deployment state belongs in `manifests/`,
+`PLAN.md`, `MEMORY.md`, `log.md` and `02_Daily/`.
+## Change intent
 
-## What this page is not
-
-It is not a runbook, not a deployment record and not a status page. If a
-statement here contradicts `AGENTS.md` or `../contracts/`, those win and this page
-is wrong.
+New work gets a plan step, not a rewrite. Change `INTENT.md` only when the
+design contract changes; a cross-role change is one commit. If it contradicts
+`AGENTS.md` or `../contracts/`, those win and this page is wrong.

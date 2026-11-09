@@ -295,7 +295,10 @@ def test_the_compose_file_mounts_no_key_and_no_signer_socket():
             f"the admin compose file references {forbidden!r} outside a comment. The "
             f"surface may not mount anything that reaches the operational key."
         )
-    assert "10.100.0.1:8088:8080" in body, "the admin page must bind the overlay address explicitly, not a wildcard"
+    assert "10.100.0.1:8088" in body, "nginx must bind the overlay address explicitly, not a wildcard"
+    assert "127.0.0.1:8080:8080" in body or (
+        "network_mode: host" in body and 'HOST: "127.0.0.1"' in body and 'PORT: "8080"' in body
+    ), "Open WebUI must stay on host loopback behind nginx"
     assert "0.0.0.0" not in body, (
         "the admin page must never bind a wildcard address; it is reachable only from inside the overlay"
     )

@@ -7,12 +7,13 @@ ROLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROLE_ROOT/scripts/sparknet-master-env.sh" >/dev/null
 
 IDENTITY=""
-CAPS="telemetry,guard-read"
+CAPS="telemetry"
+NODE_PUBKEY=""
 OUT=""
 
 usage() {
   cat <<'USAGE'
-usage: sparknet-registry-sign.sh --identity <identity.json> [--capabilities c1,c2] [--out <entry.json>]
+usage: sparknet-registry-sign.sh --identity <identity.json> [--capabilities c1,c2] [--node-pubkey <file-or-b64>] [--out <entry.json>]
 
 Signs the identity file with the Master's operational key (from $SPARKNET_STATE_DIR/keys/operational.ed25519)
 and writes a registry entry JSON to stdout or --out.
@@ -23,6 +24,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --identity) IDENTITY="$2"; shift 2 ;;
     --capabilities) CAPS="$2"; shift 2 ;;
+    --node-pubkey) NODE_PUBKEY="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage; exit 1 ;;
@@ -39,41 +41,35 @@ OP_PRIV="$STATE_DIR/keys/operational.ed25519"
 PY="${PY:-$FABRIC_ROOT/.venv/bin/python}"
 [ -x "$PY" ] || PY="$(command -v python3)"
 
-# build capabilities array
-IFS=',' read -r -a cap_arr <<< "$CAPS"
-cap_list=""
-for c in "${cap_arr[@]}"; do
-  c_trimmed=$(echo "$c" | tr -d '[:space:]')
-  [ -n "$c_trimmed" ] && cap_list+="\"$c_trimmed\","
-done
-cap_list="[${cap_list%,}]"
-
-# sign via authz
-tmp=$(mktemp)
-cat > "$tmp.py" <<PYEOF
-import sys, json
-sys.path.insert(0, '${FABRIC_ROOT}')
+IDENTITY_PATH="$IDENTITY" NODE_PUBKEY_VALUE="$NODE_PUBKEY" OP_PRIV_PATH="$OP_PRIV" \
+CAPS_RAW="$CAPS" OUT_PATH="$OUT" FABRIC_ROOT="$FABRIC_ROOT" "$PY" - <<'PYEOF'
 import importlib.util
-spec = importlib.util.spec_from_file_location('authz', '${FABRIC_ROOT}/shared/sparknet-authz.py')
-authz = importlib.util.module_from_spec(spec)
-sys.modules['authz'] = authz
-spec.loader.exec_module(authz)
-from pathlib import Path
+import json
+import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-identity = json.loads(Path('${IDENTITY}').read_text())
-priv_b64 = Path('${OP_PRIV}').read_text().strip()
-priv = authz.private_key_from_b64(priv_b64)
-cap = json.loads('${cap_list}')
-now = datetime.now(timezone.utc)
-entry = authz.sign_authorization(identity, priv, cap, ttl_days=365, now=now)
-print(json.dumps(entry, indent=2, sort_keys=False))
+fabric_root = os.environ["FABRIC_ROOT"]
+sys.path.insert(0, fabric_root)
+spec = importlib.util.spec_from_file_location("authz", f"{fabric_root}/shared/sparknet-authz.py")
+authz = importlib.util.module_from_spec(spec)
+sys.modules["authz"] = authz
+spec.loader.exec_module(authz)
+
+identity = json.loads(Path(os.environ["IDENTITY_PATH"]).read_text())
+raw_pub = os.environ.get("NODE_PUBKEY_VALUE", "").strip()
+node_pubkey = Path(raw_pub).read_text().strip() if raw_pub and Path(raw_pub).is_file() else (raw_pub or None)
+node_pubkey = node_pubkey or identity.get("node_pubkey_b64")
+private = authz.private_key_from_b64(Path(os.environ["OP_PRIV_PATH"]).read_text().strip())
+caps = [value.strip() for value in os.environ.get("CAPS_RAW", "").split(",") if value.strip()]
+entry = authz.sign_authorization(
+    identity, private, caps, ttl_days=365, now=datetime.now(timezone.utc), node_pubkey_b64=node_pubkey
+)
+text = json.dumps(entry, indent=2, sort_keys=False) + "\n"
+out = os.environ.get("OUT_PATH", "")
+if out:
+    Path(out).write_text(text)
+else:
+    sys.stdout.write(text)
 PYEOF
-"$PY" "$tmp.py" > "$tmp.out"
-rm -f "$tmp.py"
-if [ -n "$OUT" ]; then
-  cp "$tmp.out" "$OUT"
-else
-  cat "$tmp.out"
-fi
-rm -f "$tmp.out"

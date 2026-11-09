@@ -1743,3 +1743,162 @@ def test_it_refuses_a_non_reversible_trust_transition(signer) -> None:
     response = signer.handle({"op": "sign-trust-transition", "root_id": signer.root_id, "transition": transition})
     assert response["ok"] is False
     assert "reversible" in response["error"]
+
+
+def test_caller_allowlist_requires_an_exact_process_path(signer_module, tmp_path):
+    """The socket mode separates accounts, not processes under one account.
+
+    SO_PEERCRED plus an exact executable/script match is the narrower boundary.
+    An empty allowlist preserves the documented filesystem-only posture; a
+    configured list refuses a different executable even when it has the same uid.
+    """
+    left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        assert signer_module._caller_allowed(left, ())
+        assert signer_module._caller_allowed(left, (sys.executable,))
+        assert not signer_module._caller_allowed(left, (str(tmp_path / "not-this-process.py"),))
+    finally:
+        left.close()
+        right.close()
+
+
+def test_ledger_verification_pins_the_operational_key(signer, signer_module, authz):
+    """A chain is only as trustworthy as the key it is pinned to.
+
+    Every block is self-signed by its own node_pubkey. Without pinning, an
+    attacker who can replace the ledger can simply generate a new key, sign a
+    fresh chain and satisfy ``verify_chain``. The verifier now accepts the
+    trusted key explicitly.
+    """
+    ledger_path = signer.ledger_path
+    ledger = json.loads(ledger_path.read_text())
+    spec = importlib.util.spec_from_file_location("ledger_for_key_pin", ROLE_ROOT / "services" / "sparknet-ledger.py")
+    ledger_module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(ledger_module)
+
+    ok, detail = ledger_module.verify_chain(ledger, signer.public_key_b64)
+    assert ok, detail
+
+    other_public = _keypair("a-different-operational-key")[1]
+    ok, detail = ledger_module.verify_chain(ledger, other_public)
+    assert not ok
+    assert "no block is signed by the trusted operational key" in detail
+
+
+def test_ledger_pin_allows_forward_key_rotation_but_not_rollback(tmp_path, authz, signer_module):
+    """A rotated ledger is accepted only through the forward edge.
+
+    The live ledger legitimately contains blocks under the old operational key
+    and later blocks under the new one. Pinning must accept that history and still
+    refuse a chain that returns to the old key after the new key took over.
+    """
+    old_private, old_public = _keypair("old-operational-key")
+    new_private, new_public = _keypair("new-operational-key")
+    old_key = authz.private_key_from_b64(old_private)
+    new_key = authz.private_key_from_b64(new_private)
+    ledger_path = tmp_path / "ledger.json"
+
+    signer_module.record_event(
+        ledger_path,
+        MASTER,
+        "trust_root_formed",
+        {"master_pubkey": old_public},
+        "root-old",
+        authz=authz,
+        private_key=old_key,
+        node_pubkey_b64=old_public,
+        clock=lambda: CLOCK,
+    )
+    signer_module.record_event(
+        ledger_path,
+        MASTER,
+        "trust_root_reformed",
+        {"master_pubkey": new_public, "previous_root_id": "root-old"},
+        "root-new",
+        authz=authz,
+        private_key=new_key,
+        node_pubkey_b64=new_public,
+        clock=lambda: CLOCK,
+    )
+
+    ledger = json.loads(ledger_path.read_text())
+    spec = importlib.util.spec_from_file_location("ledger_for_rotation", ROLE_ROOT / "services" / "sparknet-ledger.py")
+    ledger_module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(ledger_module)
+    ok, detail = ledger_module.verify_chain(ledger, new_public)
+    assert ok, detail
+
+    signer_module.record_event(
+        ledger_path,
+        MASTER,
+        "signature_issued",
+        {"operation": "old-key-after-rotation"},
+        "root-old",
+        authz=authz,
+        private_key=old_key,
+        node_pubkey_b64=old_public,
+        clock=lambda: CLOCK,
+    )
+    ledger = json.loads(ledger_path.read_text())
+    ok, detail = ledger_module.verify_chain(ledger, new_public)
+    assert not ok
+    assert "returns to an old key" in detail
+
+
+def test_serve_one_refuses_a_disallowed_caller_before_parsing(signer_module):
+    """The allowlist check runs before the request is parsed or handled."""
+
+    class FakeSigner:
+        def __init__(self):
+            self.calls = 0
+
+        def handle(self, request):
+            self.calls += 1
+            return {"ok": True, "request": request}
+
+    fake = FakeSigner()
+    left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        thread = threading.Thread(
+            target=signer_module._serve_one,
+            args=(fake, left, 1 << 20, 1.0, threading.Lock(), (str(Path(sys.executable).resolve()),)),
+        )
+        thread.start()
+        right.sendall(b'{"op":"capabilities"}\n')
+        allowed = json.loads(right.makefile("rb").readline())
+        thread.join(timeout=2)
+        assert allowed["request"] == {"op": "capabilities"}
+        assert fake.calls == 1
+    finally:
+        left.close()
+        right.close()
+
+    fake = FakeSigner()
+    left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        thread = threading.Thread(
+            target=signer_module._serve_one,
+            args=(fake, left, 1 << 20, 1.0, threading.Lock(), ("/definitely/not/this/process.py",)),
+        )
+        thread.start()
+        right.sendall(b'{"op":"capabilities"}\n')
+        refused = json.loads(right.makefile("rb").readline())
+        thread.join(timeout=2)
+        assert refused == {"ok": False, "error": "caller-not-allowed"}
+        assert fake.calls == 0
+    finally:
+        left.close()
+        right.close()
+
+
+def test_caller_allowlist_can_use_a_dedicated_signer_uid(signer_module):
+    """With a dedicated signer user, the uid is the boundary, not /proc paths."""
+    left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        assert signer_module._caller_allowed(left, (), (os.getuid(),))
+        assert not signer_module._caller_allowed(left, (), (os.getuid() + 1,))
+    finally:
+        left.close()
+        right.close()

@@ -200,8 +200,17 @@ import json
 import os
 import socket
 import sys
+import http.client
 import urllib.error
 import urllib.request
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -434,7 +443,7 @@ request = urllib.request.Request(
 )
 exit_code = 0
 try:
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _opener.open(request, timeout=timeout) as response:
         record["status"] = response.status
         record["response"] = response.read().decode("utf-8", "replace")
         record["delivered"] = response.status == 200
@@ -445,7 +454,7 @@ except urllib.error.HTTPError as exc:
     record["response"] = exc.read().decode("utf-8", "replace")
     record["error"] = f"the peer refused the answer (HTTP {exc.code})"
     exit_code = 1
-except (urllib.error.URLError, OSError) as exc:
+except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as exc:
     record["error"] = f"could not reach the peer: {exc}"
     exit_code = 1
 

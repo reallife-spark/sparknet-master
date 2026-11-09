@@ -66,6 +66,7 @@ refusal.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import errno
 import importlib.util
 import json
@@ -73,6 +74,7 @@ import os
 import re
 import socket
 import stat
+import struct
 import sys
 import threading
 import time
@@ -129,6 +131,7 @@ SIGN_OPERATIONS = (
     "sign-share-ratification",
     "record-share-evidence",
     "sign-trust-transition",
+    "sign-distillation-run",
 )
 READ_OPERATIONS = ("capabilities", "public-key", "root-id", "ping")
 OPERATIONS = SIGN_OPERATIONS + READ_OPERATIONS
@@ -270,7 +273,14 @@ def check_key_matches_root(public_key_b64: str, root: dict[str, Any], consensus:
         )
 
 
-def check_not_reverted(ledger_path: Path, consensus: Any, root: dict[str, Any], allow_requalification: bool) -> None:
+def check_not_reverted(
+    ledger_path: Path,
+    consensus: Any,
+    root: dict[str, Any],
+    allow_requalification: bool,
+    expected_pubkey_b64: str,
+    authz: Any,
+) -> None:
     """Refuse to start against a root older than one this node has already served.
 
     A stale root is the hardest case in this file, because on its own it is
@@ -303,6 +313,21 @@ def check_not_reverted(ledger_path: Path, consensus: Any, root: dict[str, Any], 
             f"than starting a signer that cannot say which root it is under."
         ) from exc
 
+    verifier = _load("sparknet_signer_ledger", ROLE_ROOT / "services" / "sparknet-ledger.py")
+    ok, detail = verifier.verify_chain(ledger, expected_pubkey_b64)
+    pre_rotation = False
+    if not ok:
+        if "no block is signed by the trusted operational key" not in detail:
+            raise SignerError(f"ledger failed verification before signing: {detail}")
+        # A ledger written entirely under the previous operational key is not a
+        # rollback if this root descends from the root in force. The transition
+        # block is appended below with the new key, and the self-signed chain
+        # still has to be intact.
+        ok, detail = verifier.verify_chain(ledger)
+        if not ok:
+            raise SignerError(f"ledger failed verification before signing: {detail}")
+        pre_rotation = True
+
     incoming = consensus.root_id(root)
     ledgers = [block.get("data", {}).get("root_id") for block in ledger.get("blocks", []) if isinstance(block, dict)]
     ledgers = [root_id for root_id in ledgers if root_id]
@@ -310,6 +335,10 @@ def check_not_reverted(ledger_path: Path, consensus: Any, root: dict[str, Any], 
         return
     in_force = ledgers[-1]
     if incoming == in_force:
+        if pre_rotation:
+            raise SignerError(
+                "the ledger is signed only by a previous operational key, but the root in force did not change"
+            )
         return
     if not allow_requalification and consensus.canonical_root(root).get("previous_root_id", "") == in_force:
         # Chained re-formation, policy B: this root names the ledger's root in
@@ -400,7 +429,7 @@ def record_event(
     block["signature"] = authz.sign_bytes(private_key, authz.ledger_block_signable(block))
     block["hash"] = _block_hash(block, authz)
     blocks.append(block)
-    _atomic_write(ledger_path, json.dumps(ledger, indent=2) + "\n", mode=0o600)
+    _atomic_write(ledger_path, json.dumps(ledger, indent=2) + "\n", mode=0o640)
     return block
 
 
@@ -408,6 +437,11 @@ def _atomic_write(path: Path, content: str, mode: int) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     try:
+        if os.geteuid() == 0:
+            # Keep the ledger readable by the group that runs the read-only
+            # verifier even when the parent directory is not setgid.
+            with contextlib.suppress(OSError):
+                os.chown(tmp, -1, path.parent.stat().st_gid)
         with os.fdopen(fd, "w") as handle:
             handle.write(content)
             handle.flush()
@@ -447,7 +481,7 @@ class Signer:
 
         check_root(root, consensus, node_id)
         check_key_matches_root(self.public_key_b64, root, consensus)
-        check_not_reverted(ledger_path, consensus, root, allow_requalification)
+        check_not_reverted(ledger_path, consensus, root, allow_requalification, self.public_key_b64, authz)
 
         # The root this process was started with is pinned. A request may name a
         # root, but only this one is acceptable — which is what makes a stale or
@@ -555,6 +589,8 @@ class Signer:
             return self._record_share_evidence(op, request)
         if op == "sign-trust-transition":
             return self._sign_trust_transition(op, request)
+        if op == "sign-distillation-run":
+            return self._sign_distillation_run(op, request)
         return self._sign_guard_approval(op, request)
 
     def _sign_registry_entry(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -887,6 +923,42 @@ class Signer:
         )
         return {"ok": True, "transition": signed, "ledger_block": block["hash"]}
 
+    def _sign_distillation_run(self, op: str, request: dict[str, Any]) -> dict[str, Any]:
+        """Sign a distillation run record and anchor it in the Master ledger."""
+        run = request.get("run")
+        if not isinstance(run, dict):
+            return self._refuse("sign-distillation-run requires a 'run' object")
+        unsigned = {key: value for key, value in run.items() if key not in {"signature_b64", "signed_at"}}
+        try:
+            self.authz.distillation_run_message(unsigned)
+        except self.authz.AuthzError as exc:
+            return self._refuse(f"distillation run is not canonicalisable: {exc}")
+        signed = self.authz.sign_distillation_run(unsigned, self.key)
+        self.signed_count += 1
+        block = record_event(
+            self.ledger_path,
+            self.node_id,
+            "distillation_run",
+            {
+                "run_id": unsigned["run_id"],
+                "dataset_id": unsigned["dataset_id"],
+                "teacher_model_id": unsigned["teacher_model_id"],
+                "teacher_sha256": unsigned.get("teacher_sha256"),
+                "student_base_model": unsigned["student_base_model"],
+                "student_base_sha256": unsigned.get("student_base_sha256"),
+                "artifact_sha256": unsigned["artifact_sha256"],
+                "signature_b64": signed["signature_b64"],
+                "decided_by": unsigned["decided_by"],
+                "decided_at": unsigned["decided_at"],
+            },
+            self.root_id,
+            authz=self.authz,
+            private_key=self.key,
+            node_pubkey_b64=self.public_key_b64,
+            clock=self.clock,
+        )
+        return {"ok": True, "run": signed, "ledger_block": block["hash"]}
+
     def _record(self, op: str, subject: str, signature_b64: str) -> dict[str, Any]:
         self.signed_count += 1
         return record_event(
@@ -909,11 +981,122 @@ class Signer:
 # --- transport ---------------------------------------------------------------
 
 
+def _peer_pid(connection: socket.socket) -> int | None:
+    """Return the Linux peer PID for a unix connection, or ``None``.
+
+    The socket's 0600 mode only separates users. On a node where the signer and
+    every service run as the same account, that boundary does not distinguish a
+    trusted caller from any other process holding the key's uid. SO_PEERCRED
+    gives the connecting process, and the optional executable allowlist below
+    closes that gap without pretending the filesystem alone does.
+
+    ``None`` means the platform has no SO_PEERCRED or the kernel refused it; the
+    caller is refused when an allowlist is configured.
+    """
+    option = getattr(socket, "SO_PEERCRED", None)
+    if option is None:
+        return None
+    try:
+        raw = connection.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("3i"))
+        pid, _uid, _gid = struct.unpack("3i", raw)
+        return pid if pid > 0 else None
+    except OSError:
+        return None
+
+
+def _process_candidates(pid: int) -> set[str]:
+    """Resolved executable, script arguments and cwd for one process."""
+    candidates: set[str] = set()
+    with contextlib.suppress(OSError):
+        candidates.add(str(Path(os.readlink(f"/proc/{pid}/exe")).resolve()))
+    try:
+        cwd = Path(os.readlink(f"/proc/{pid}/cwd"))
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return candidates
+    for token in raw.split(b"\0"):
+        if not token:
+            continue
+        try:
+            candidate = Path(os.fsdecode(token))
+            if not candidate.is_absolute():
+                candidate = cwd / candidate
+            candidates.add(str(candidate.resolve()))
+        except (OSError, ValueError):
+            continue
+    return candidates
+
+
+def _ancestor_pids(pid: int, depth: int = 3) -> list[int]:
+    """The peer and a few ancestors, bounded so a long shell chain is not a bypass."""
+    chain: list[int] = []
+    current = pid
+    for _ in range(depth + 1):
+        if current <= 1 or current in chain:
+            break
+        chain.append(current)
+        try:
+            stat = Path(f"/proc/{current}/stat").read_text()
+            current = int(stat.rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            break
+    return chain
+
+
+def _peer_uid(connection: socket.socket) -> int | None:
+    """Return the Linux peer uid for a unix connection, or ``None``."""
+    option = getattr(socket, "SO_PEERCRED", None)
+    if option is None:
+        return None
+    try:
+        raw = connection.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("3i"))
+        _pid, uid, _gid = struct.unpack("3i", raw)
+        return uid
+    except OSError:
+        return None
+
+
+def _caller_allowed(
+    connection: socket.socket,
+    allow_callers: tuple[str, ...],
+    allow_uids: tuple[int, ...] = (),
+) -> bool:
+    """Check the peer process and its immediate ancestors against an exact allowlist.
+
+    Matching any command-line token or the resolved executable, not a substring:
+    ``/tmp/sparknet-admin-console.py`` must not pass as the real service path.
+    Ancestors are included because the operator scripts hand Python a here-doc
+    (``python -``); the Python process names no script, while its parent bash
+    process names the trusted script. The walk is bounded to three levels.
+
+    An allowlist entry is resolved too, so a symlink under the state directory
+    cannot be swapped for another binary after the unit starts.
+    """
+    if not allow_callers and not allow_uids:
+        return True
+    uid = _peer_uid(connection)
+    if uid is not None and uid in allow_uids:
+        return True
+    if not allow_callers:
+        return False
+    pid = _peer_pid(connection)
+    if pid is None:
+        return False
+    candidates: set[str] = set()
+    for ancestor in _ancestor_pids(pid):
+        candidates |= _process_candidates(ancestor)
+    allowed = {str(Path(value).resolve()) for value in allow_callers}
+    return bool(candidates & allowed)
+
+
 def serve(
     signer: Signer,
     socket_path: Path,
     max_request_bytes: int = 1 << 20,
     read_timeout: float = REQUEST_READ_TIMEOUT_SECONDS,
+    allow_callers: tuple[str, ...] = (),
+    allow_uids: tuple[int, ...] = (),
+    socket_mode: int = 0o600,
 ) -> None:
     """One JSON object per line; each connection served on its own thread.
 
@@ -947,13 +1130,13 @@ def serve(
         server.bind(str(socket_path))
         # 0600 on the socket itself: the peer surface runs as the same uid on most
         # nodes, so directory permissions alone would not keep it out.
-        os.chmod(socket_path, 0o600)
+        os.chmod(socket_path, socket_mode)
         server.listen(8)
         while True:
             connection, _ = server.accept()
             threading.Thread(
                 target=_serve_one,
-                args=(signer, connection, max_request_bytes, read_timeout, sign_lock),
+                args=(signer, connection, max_request_bytes, read_timeout, sign_lock, allow_callers, allow_uids),
                 name="signer-client",
                 daemon=True,
             ).start()
@@ -1002,6 +1185,8 @@ def _serve_one(
     max_request_bytes: int,
     read_timeout: float,
     sign_lock: threading.Lock,
+    allow_callers: tuple[str, ...] = (),
+    allow_uids: tuple[int, ...] = (),
 ) -> None:
     """Read one line, answer once, close. Runs in a per-connection thread.
 
@@ -1011,6 +1196,9 @@ def _serve_one(
     connected-but-silent client would hold this thread's slot forever.
     """
     with connection:
+        if not _caller_allowed(connection, allow_callers, allow_uids):
+            _send(connection, {"ok": False, "error": "caller-not-allowed"})
+            return
         try:
             line = _read_line(connection, max_request_bytes, read_timeout)
         except _ReadTimeout:
@@ -1059,6 +1247,29 @@ def main(argv: list[str] | None = None) -> int:
     # Path() collapses "tcp://host:port" to "tcp:/host:port" and the check that
     # exists to catch exactly that input would miss it.
     parser.add_argument("--socket", default=str(DEFAULT_STATE_DIR / "signer" / "signer.sock"))
+    parser.add_argument(
+        "--allow-uid",
+        action="append",
+        type=int,
+        default=[],
+        metavar="UID",
+        help="allow this numeric uid (repeatable); useful when the signer runs as a dedicated user",
+    )
+    parser.add_argument(
+        "--socket-mode",
+        default="0600",
+        help="socket permission mode (default 0600; use 0660 with a dedicated signer group)",
+    )
+    parser.add_argument(
+        "--allow-caller",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "restrict signing to processes whose executable or script argument is exactly PATH; "
+            "repeatable. Without it the socket's 0600 mode is the only caller boundary."
+        ),
+    )
     parser.add_argument("--ledger", type=Path, default=ROLE_ROOT / "blockchain" / "ledger.json")
     parser.add_argument(
         "--accept-requalification",
@@ -1111,7 +1322,16 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
     try:
-        serve(signer, args.socket)
+        mode = int(args.socket_mode, 8)
+        if mode & 0o007:
+            raise SignerError("socket mode must not be world-accessible")
+        serve(
+            signer,
+            args.socket,
+            allow_callers=tuple(args.allow_caller),
+            allow_uids=tuple(args.allow_uid),
+            socket_mode=mode,
+        )
     except KeyboardInterrupt:
         return 0
     except OSError as exc:
@@ -1129,6 +1349,7 @@ def describe() -> dict[str, Any]:
         "operations": list(OPERATIONS),
         "signs": list(SIGN_OPERATIONS),
         "transport": "unix socket, mode 0600, one JSON object per line",
+        "caller_allowlist": "not configured (socket mode is the only boundary)",
         "refuses": [
             "a TCP address for the socket",
             "a socket path outside $SPARKNET_STATE_DIR",

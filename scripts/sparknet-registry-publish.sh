@@ -141,6 +141,13 @@ if sequence_file.is_file():
         last = int(json.loads(sequence_file.read_text()).get("sequence") or 0)
     except (OSError, json.JSONDecodeError, ValueError, TypeError):
         sys.exit(f"cannot read the last sequence from {sequence_file}")
+current_path = out_dir / "current.json"
+if current_path.is_file():
+    try:
+        current_seq = int(json.loads(current_path.read_text()).get("sequence") or 0)
+    except (OSError, json.JSONDecodeError, ValueError, TypeError):
+        sys.exit(f"cannot read the published sequence from {current_path}")
+    last = max(last, current_seq)
 
 if sequence_arg:
     try:
@@ -235,15 +242,30 @@ try:
 except install.InstallError as exc:
     sys.exit(f"internal: a peer would refuse this publication [{exc.code}]: {exc.detail}")
 
+def write_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import tempfile
+
+    fd, name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name, path)
+    except Exception:
+        try:
+            os.unlink(name)
+        except OSError:
+            pass
+        raise
+
+
 out_dir.mkdir(parents=True, exist_ok=True)
 out_file = out_dir / "current.json"
-tmp = out_file.with_name(out_file.name + ".tmp")
-tmp.write_text(json.dumps(artifact, indent=2) + "\n")
-os.replace(tmp, out_file)
-
-sequence_file.parent.mkdir(parents=True, exist_ok=True)
-tmp = sequence_file.with_name(sequence_file.name + ".tmp")
-tmp.write_text(
+write_atomic(out_file, json.dumps(artifact, indent=2) + "\n")
+write_atomic(
+    sequence_file,
     json.dumps(
         {
             "sequence": sequence,
@@ -253,9 +275,8 @@ tmp.write_text(
         },
         indent=2,
     )
-    + "\n"
+    + "\n",
 )
-os.replace(tmp, sequence_file)
 
 entries = len(registry.get("authorizations") or [])
 print(

@@ -11,6 +11,7 @@
 | `sparknet-reflex-broker.service` | Reflex broker control surface; staged, not enabled |
 | `sparknet-wg-observer.service` / `.timer` | Root WireGuard evidence for the nocturnal scheduler; staged, not enabled |
 | `sparknet-registry-deliver.service` / `.timer` | Delivers a signed registry publication to peers |
+| `sparknet-container-registry.service` | Private loopback OCI distribution; staged, needs a 0600 token file |
 
 `make wg-observer-unit` stages the observer and its timer but enables neither.
 The service is a root oneshot; the timer only wakes it every 60 seconds. A root

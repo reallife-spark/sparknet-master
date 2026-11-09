@@ -1,0 +1,96 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "local/${MODEL_ID}",
+  "small_model": "local/${SMALL_MODEL_ID}",
+  "provider": {
+    "local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Sparknet sandbox model",
+      "options": {
+        "baseURL": "${MODEL_PROXY_URL}",
+        "timeout": false,
+        "headerTimeout": 600000,
+        "chunkTimeout": 300000
+      },
+      "models": {
+        "${MODEL_ID}": {
+          "name": "${MODEL_ID}",
+          "tool_call": true,
+          "reasoning": true,
+          "temperature": true,
+          "limit": {
+            "context": 131072,
+            "output": 8192
+          }
+        },
+        "${SMALL_MODEL_ID}": {
+          "name": "${SMALL_MODEL_ID}",
+          "tool_call": true,
+          "reasoning": true,
+          "temperature": true,
+          "limit": {
+            "context": 65536,
+            "output": 4096
+          }
+        }
+      }
+    }
+  },
+  "permission": {
+    "edit": {
+      "*": "allow"
+    },
+    "bash": {
+      "*": "allow"
+    },
+    "webfetch": "deny",
+    "external_directory": {
+      "*": "deny"
+    }
+  },
+  "agent": {
+    "sparknet-chat": {
+      "mode": "primary",
+      "description": "Sparknet chat: answer from this user's vault, read-only.",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "webfetch": "deny",
+        "external_directory": "deny"
+      }
+    },
+    "sparknet-plan": {
+      "mode": "primary",
+      "description": "Sparknet plan: read the vault and produce a plan; no writes or shell.",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "webfetch": "deny",
+        "external_directory": "deny"
+      }
+    },
+    "sparknet-build": {
+      "mode": "primary",
+      "description": "Sparknet build: edit files and run commands inside this user's vault sandbox only.",
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "allow"
+        },
+        "webfetch": "deny",
+        "external_directory": "deny"
+      }
+    }
+  },
+  "instructions": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "MISSION.md",
+    "INTENT.md"
+  ],
+  "compaction": {
+    "auto": true,
+    "prune": false,
+    "reserved": 10000
+  }
+}

@@ -101,7 +101,7 @@ The Master wraps the signed registry in five fields and signs three of them:
 
 | Field | In the signature? | Meaning |
 |---|---|---|
-| `sequence` | yes | monotonic counter; a peer refuses anything not greater than its installed sequence |
+| `sequence` | yes | monotonic counter; a peer refuses a lower sequence, and an equal one only if its digest differs |
 | `published_at` | yes | when this publication was made (ISO-8601 UTC) |
 | `registry_sha256` | yes | SHA-256 of the canonical registry bytes |
 | `registry` | via the digest | the signed registry document |
@@ -125,7 +125,12 @@ ahead of the Master) without the Master key.
    `http://<overlay>:9090/api/v1/registry`. It delivers to revoked entries too:
    the node being revoked must receive the document that revokes it.
 3. The peer's guard verifies and installs it (below). It answers
-   `REGISTRY_INSTALLED`, or one of the refusal codes in the contract.
+   `REGISTRY_INSTALLED`, `REGISTRY_ALREADY_INSTALLED` for the steady-state
+   re-push, or one of the refusal codes in the contract.
+
+The deliverer skips an entry whose address is the overlay anchor
+(`contracts/overlay.json`): that is the Master itself, and there is no guard
+there to receive its own publication.
 
 `sparknet-registry-deliver.timer` re-pushes every **60 s**. That interval is
 the documented revocation window: a peer whose first push failed is converged
@@ -144,7 +149,7 @@ the operator can act on:
 | the signature verifies under `manifests/keys/master-ed25519.pub.b64` | `403 bad_signature` |
 | the registry names the same Master key the peer pinned | `403 wrong_master_key` |
 | the document satisfies `contracts/registry-schema.json`, entries included | `400 invalid_registry` |
-| `sequence` is greater than the installed one | `409 stale_publication` |
+| `sequence` is not lower, and an equal one carries the same digest | `409 stale_publication` |
 | a pinned key exists at all | `503 no_master_key` |
 
 The peer never trusts the key an incoming registry *names*; it only checks that
@@ -154,8 +159,12 @@ refuses everything.
 Installing is two atomic writes: the registry first, then
 `manifests/registry-installation.json` (the sequence record). A crash between
 them leaves an older record, so re-delivering the same publication is accepted
-— convergence, not a deadlock. Re-delivering an *already installed* publication
-is refused as stale, which is what makes equality the replay signal.
+— convergence, not a deadlock. Re-delivering the publication whose sequence
+*and* digest are already installed answers `REGISTRY_ALREADY_INSTALLED` and
+writes nothing: the 60 s re-delivery pass must be a no-op, or the delivery unit
+would fail on every tick. Equality alone does not buy that: an equal sequence
+carrying a different registry is a fork, not a replay, and is refused as
+`stale_publication` — as is any lower sequence.
 
 Registry installation is a write to the peer's own vault, so it needs neither
 `--apply-enabled` nor euid 0. That flag arms writes to protected `/etc` paths.

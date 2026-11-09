@@ -1,0 +1,102 @@
+{
+  "schema": "sparknet-model-bakeoff/1",
+  "role": "master",
+  "node": "agx64",
+  "description": "Teacher bake-off on the 64 GB Master host. These are existing Ollama models; the newest Qwen3.8 Flash Next candidate stays in the catalog but is not benchmarkable until a qwen4exp-capable runtime is installed.",
+  "provider": {
+    "kind": "ollama",
+    "base_url": "http://127.0.0.1:11434"
+  },
+  "options": {
+    "runs": 2,
+    "warmup": 1,
+    "num_ctx": 8192,
+    "num_predict": 256,
+    "temperature": 0,
+    "seed": 42,
+    "timeout_seconds": 600,
+    "unload_after": true,
+    "think": false
+  },
+  "candidates": [
+    {
+      "id": "qwen3.6-35b-a3b-q4-k-m",
+      "catalog_id": "qwen3.6-35b-a3b-q4-k-m",
+      "role": "teacher",
+      "model": "qwen3.6-35b-262k:latest",
+      "why": "Proven Qwen3.6 35B-A3B Q4_K_M on the peer; the live teacher winner on the Master host."
+    },
+    {
+      "id": "qwen3.6-35b-a3b-q8",
+      "catalog_id": "qwen3.6-35b-a3b-q8",
+      "role": "teacher",
+      "model": "qwen3.6-35b-262k-q8:latest",
+      "why": "Quality reference; needs more free unified memory than Q4_K_M."
+    },
+    {
+      "id": "gemma4-26b-a4b",
+      "catalog_id": null,
+      "role": "teacher",
+      "model": "gemma4-26b-262k:latest",
+      "why": "Existing MoE baseline on the peer; different family, included only to calibrate speed/memory."
+    }
+  ],
+  "prompts": [
+    {
+      "id": "short",
+      "prompt": "Answer in one sentence: what is the difference between a checksum and a signature?",
+      "must_include": [
+        "signature"
+      ],
+      "max_tokens": 96
+    },
+    {
+      "id": "json",
+      "prompt": "Return only JSON with keys node, role, reachable. Use node=agx64, role=master, reachable=true.",
+      "must_include": [
+        "\"node\"",
+        "agx64"
+      ],
+      "max_tokens": 96
+    },
+    {
+      "id": "code",
+      "prompt": "Write a Python function named add(a, b) that returns the sum. Return only the function.",
+      "must_include": [
+        "def add",
+        "return"
+      ],
+      "max_tokens": 160
+    },
+    {
+      "id": "math",
+      "prompt": "Compute 17 * 23. Return only the number.",
+      "must_include": [
+        "391"
+      ],
+      "max_tokens": 32
+    },
+    {
+      "id": "refusal",
+      "prompt": "You cannot sign a registry entry. State that plainly in one sentence without claiming you can.",
+      "must_not_include": [
+        "I can sign",
+        "I will sign"
+      ],
+      "max_tokens": 96,
+      "must_include_any": [
+        "cannot",
+        "unable to",
+        "not able"
+      ]
+    },
+    {
+      "id": "long-context",
+      "prompt": "Read this identifier list and answer with the third identifier only: alpha-17, beta-42, gamma-91, delta-08.",
+      "must_include": [
+        "gamma-91"
+      ],
+      "max_tokens": 48
+    }
+  ]
+}

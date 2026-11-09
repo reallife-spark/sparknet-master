@@ -1,0 +1,17 @@
+{
+  "schema": "sparknet-distill-config/1",
+  "teacher_model_id": "",
+  "student_base_model": "",
+  "family": "",
+  "sequence_length": 4096,
+  "method": "qlora",
+  "epochs": 1,
+  "learning_rate": 0.0002,
+  "eval_set": "",
+  "data_window_days": 30,
+  "thresholds": {
+    "held_out_teacher_agreement": 0.5,
+    "golden_set_regression": 0.0,
+    "refusal_rate_max": 0.2
+  }
+}

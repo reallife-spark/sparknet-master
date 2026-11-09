@@ -43,5 +43,7 @@ updated: 2026-10-22
 
 - Registry distribution to a peer (build plan Step 6) — there is no channel, so
   revocation propagation cannot be measured.
-- The four admin services `4220`–`4223` — `spec-only` in
-  [`../../contracts/ports.json`](../../contracts/ports.json).
+- The four admin services `4220`–`4223` are built/live on the pair as of
+  2026-10-31: read-only git, read-only file share, NAT status/dry-run, and the
+  signed vector store. Their live reachability is a two-node observation, not a
+  fleet-wide claim.

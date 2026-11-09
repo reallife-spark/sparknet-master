@@ -131,6 +131,16 @@ entries = registry.get("authorizations") if isinstance(registry, dict) else None
 if not isinstance(entries, list):
     sys.exit(f"{publication_path} carries no registry authorizations[] list")
 
+# The Master sits at the overlay anchor (contracts/overlay.json), which is
+# reserved and never assignable to a peer. If the registry carries an entry for
+# the Master itself, there is no guard to hand it to: POSTing to the anchor
+# address cannot succeed, and treating it as a delivery failure would leave the
+# re-delivery unit red on every tick forever.
+try:
+    anchor_ip = str(json.loads((FABRIC_ROOT / "contracts" / "overlay.json").read_text())["master_anchor_ipv4"])
+except (OSError, json.JSONDecodeError, KeyError, TypeError):
+    anchor_ip = ""
+
 if peer_filter:
     targets = [e for e in entries if isinstance(e, dict) and e.get("fingerprint") == peer_filter]
     if not targets:
@@ -173,6 +183,21 @@ for entry in targets:
             )
             exit_code = 1
             continue
+        if anchor_ip and address == anchor_ip:
+            print(
+                f"skipping {fingerprint[:16]}...: {address} is the master anchor, not a peer",
+                file=sys.stderr,
+            )
+            records.append(
+                {
+                    "fingerprint": fingerprint,
+                    "url": None,
+                    "delivered": False,
+                    "skipped": "master_anchor",
+                    "error": None,
+                }
+            )
+            continue
         url = f"http://{address}:{GUARD_PORT}{GUARD_ROUTE}"
 
     record = {
@@ -192,19 +217,34 @@ for entry in targets:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+            return None
+
+    # A proxy or a 302 would let a third party answer "200" without the guard
+    # ever installing the publication.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8", "replace")
+        with opener.open(request, timeout=timeout) as response:
+            body = response.read(65536).decode("utf-8", "replace")
             record["status"] = response.status
             record["response"] = body
-            record["delivered"] = True
+            try:
+                result = json.loads(body)
+            except json.JSONDecodeError:
+                result = {}
+            if result.get("status") not in {"REGISTRY_INSTALLED", "REGISTRY_ALREADY_INSTALLED"}:
+                record["error"] = "peer did not confirm registry installation"
+                exit_code = 1
+            else:
+                record["delivered"] = True
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
         record["status"] = exc.code
         record["response"] = body
         record["error"] = f"the peer refused the publication (HTTP {exc.code})"
         exit_code = 1
-    except (urllib.error.URLError, OSError) as exc:
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as exc:
         record["error"] = f"could not reach the peer: {exc}"
         exit_code = 1
     records.append(record)

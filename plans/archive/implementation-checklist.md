@@ -3,7 +3,7 @@
 > [!warning] **Superseded and non-authoritative.** This is the early
 > template-build checklist, last meaningful around 2026-10-03. "Phase 5" here is
 > not the fabric's current Phase 5 (Open WebUI), and the unchecked items are not
-> the current backlog. Use [`MASTER_BUILD_PLAN.md`](MASTER_BUILD_PLAN.md) for
+> the current backlog. Use [`../../PLAN.md`](../../PLAN.md) for
 > Master work and the fabric [`../../PLAN.md`](../../PLAN.md) for cross-role work.
 
 ## Phase 0-2: Planning & Knowledge - DONE

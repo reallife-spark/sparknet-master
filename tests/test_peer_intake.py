@@ -60,6 +60,8 @@ def _directory(*, telemetry: bool = True, revoked: bool = False, loopback: bool 
                 "overlay_ipv4": "127.0.0.1/32",
                 "capabilities": ["telemetry", "guard-apply"] if telemetry else ["guard-apply"],
                 "revoked": revoked,
+                "issued_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
             }
         )
     return intake.PeerDirectory(entries)
@@ -130,7 +132,18 @@ def test_the_source_gate_refuses_an_unknown_source() -> None:
 
 
 def test_the_address_is_matched_bare_of_its_prefix() -> None:
-    d = intake.PeerDirectory([{"fingerprint": PEER_FP, "overlay_ipv4": "10.100.0.9/32", "capabilities": ["telemetry"]}])
+    now = datetime.now(timezone.utc)
+    d = intake.PeerDirectory(
+        [
+            {
+                "fingerprint": PEER_FP,
+                "overlay_ipv4": "10.100.0.9/32",
+                "capabilities": ["telemetry"],
+                "issued_at": (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+                "expires_at": (now + timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+            }
+        ]
+    )
     assert d.attribute("10.100.0.9") == (PEER_FP, "")
 
 

@@ -4,7 +4,7 @@
 > The session below assumed ConnectX-7/RDMA and a 512 GB+ pooled Nocturnal UMA.
 > The deployed `agx64`/`agx32` pair has no RDMA, no shared GPU address space and
 > no ConnectX-7; Nocturnal mode is a batch lease over independent nodes. See
-> [`scenarios-and-boms.md`](scenarios-and-boms.md). The plan phases are retained
+> [`../scenarios-and-boms.md`](../scenarios-and-boms.md). The plan phases are retained
 > as provenance.
 
 This document captures the planning session for ingesting the Sparknet Master Architecture & Deployment Summary (Google Doc) and restating the execution plan.

@@ -1,0 +1,31 @@
+# The Master's RFI responder — scoped fabric knowledge, never authority.
+#
+# Staged by `make rfi-responder-unit`, not enabled by `make units`. Answering a
+# peer's question is a deliberate operator act: the service reads the intake
+# queue, searches only the allow-listed fabric corpus, and delegates signing and
+# delivery to scripts/sparknet-rfi-answer.sh --request (the isolated signer, or
+# --offline only in a test).
+#
+# It holds no key, opens no listener, grants nothing, and returns an empty answer
+# when the corpus has no match. See contracts/knowledge-flow.md and
+# contracts/rfi-schema.json.
+
+[Unit]
+Description=Sparknet Master RFI responder (scoped fabric knowledge, no authority)
+After=network-online.target sparknet-peer-intake.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.env
+Environment=SPARKNET_RFI_REQUEST_DIR=/mnt/log/sparknet-rfi-requests
+Environment=SPARKNET_RFI_PROCESSED_DIR=/mnt/log/sparknet-rfi-requests/processed
+ExecStart=/usr/bin/env python3 %h/services/sparknet-rfi-responder.py --watch --interval 30 --registry %h/manifests/node-authorizations.json
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ReadWritePaths=/mnt/log
+
+[Install]
+WantedBy=multi-user.target

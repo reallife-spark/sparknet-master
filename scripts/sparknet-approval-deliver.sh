@@ -90,8 +90,17 @@ import base64
 import json
 import os
 import sys
+import http.client
 import urllib.error
 import urllib.request
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -208,7 +217,7 @@ record = {
 }
 exit_code = 0
 try:
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _opener.open(request, timeout=timeout) as response:
         body = response.read().decode("utf-8", "replace")
         record["status"] = response.status
         record["response"] = body
@@ -219,7 +228,7 @@ except urllib.error.HTTPError as exc:
     record["response"] = body
     record["error"] = f"the peer refused the approval (HTTP {exc.code})"
     exit_code = 1
-except (urllib.error.URLError, OSError) as exc:
+except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as exc:
     record["error"] = f"could not reach the peer: {exc}"
     exit_code = 1
 

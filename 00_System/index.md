@@ -41,11 +41,11 @@ Links on this page are wikilinks so they resolve whether the page is opened as
 
 - Why this role exists: [[MISSION]]
 - The design contract and first-deployment expectations: [[INTENT]]
+- The operating context loaded by every AI surface: [[CONTEXT]]
 - Session memory: `MEMORY.md`, then `02_Daily/<today>.md`
-- Work in flight: [[MASTER_BUILD_PLAN]] — `plans/MASTER_BUILD_PLAN.md`'s
-  `current:` names the step. The Master is elected, not assumed: the
-  election/signer arc is proven live (2026-10-07); the admin surface is
-  declared, not bound
+- Work in flight: [[PLAN]] — `PLAN.md`'s `current:` names the step.
+  `plans/MASTER_BUILD_PLAN.md` is a compatibility symlink. The Master is
+  elected, not assumed: the election/signer arc is proven live (2026-10-07).
 - Infrastructure administration: [[MASTER_ADMIN_PLAN]] — the admin
   federation (`admin-supervise`) ran live on the pair 2026-10-12; git, file
   share, NAT and the vector DB remain spec-only

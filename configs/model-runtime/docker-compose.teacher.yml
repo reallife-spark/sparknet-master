@@ -1,0 +1,44 @@
+# The peer's teacher model runtime. This is an on-demand profile: the runtime
+# supervisor starts it for a work session and stops it on the idle lease. It is
+# not part of the always-on Open WebUI/Qdrant stack.
+#
+# The model file is supplied by scripts/sparknet-model-runtime.py from the pull
+# manifest. It is mounted read-only; the teacher container holds no key, no
+# signer socket and no vault.
+name: sparknet-teacher
+
+services:
+  teacher:
+    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggerganov/llama.cpp:server-cuda}
+    container_name: sparknet-teacher
+    profiles: ["teacher"]
+    restart: "no"
+    network_mode: host
+    ipc: host
+    command:
+      - --model
+      - ${TEACHER_MODEL_FILE:?set TEACHER_MODEL_FILE from the model manifest}
+      - --ctx-size
+      - ${TEACHER_CTX_SIZE:-32768}
+      - --n-gpu-layers
+      - ${TEACHER_N_GPU_LAYERS:-999}
+      - --host
+      - 127.0.0.1
+      - --port
+      - "8100"
+      - --jinja
+      - --flash-attn
+    environment:
+      LLAMA_ARG_HOST: 127.0.0.1
+      LLAMA_ARG_PORT: "8100"
+    volumes:
+      - ${SPARKNET_MODEL_STORE:-/mnt/ai/models}:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    security_opt:
+      - no-new-privileges:true

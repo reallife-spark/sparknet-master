@@ -37,7 +37,7 @@ done
 
 Then read `AGENTS.md` (the charter — it wins over any other page), `MISSION.md`,
 `INTENT.md`, `MEMORY.md`, today's `sessions/<date>.md`, and
-`plans/MASTER_BUILD_PLAN.md` for the `current:` cursor.
+`PLAN.md` for the `current:` cursor.
 
 ## What is actually true right now
 

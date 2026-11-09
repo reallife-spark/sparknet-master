@@ -119,7 +119,7 @@ explains the code.
 
 | Path | What it is |
 |---|---|
-| `services/` | The twelve master services. Each is a single-file program with a `--help`. |
+| `services/` | The thirteen master services. Each is a single-file program with a `--help`. |
 | `scripts/` | The 16 operational scripts: keys, approvals, registry publication and delivery, RFI answers, overlay, the KillSwitch. |
 | `systemd/` | Nine units. |
 | `manifests/` | The master's declared identity, trust root, registry schema and admin-surface intent. |
@@ -330,6 +330,14 @@ carry no authority. `systemd/sparknet-peer-intake.service` is staged by
 and covers each refusal. See `../../MASTER_OBSERVABILITY_DESIGN.md` and
 `../../RFI_REQUEST_DESIGN.md`.
 
+### `sparknet-rfi-responder.py` — the scoped knowledge responder
+
+Consumes the RFI request queue, searches only the allow-listed fabric corpus,
+enforces the request's `scope`, returns an empty answer when nothing matches,
+and delegates signing/delivery to `scripts/sparknet-rfi-answer.sh --request`.
+It holds no key and opens no listener. The unit is staged, not enabled; a live
+cross-node answer remains `DoD: confirm: user`.
+
 ### `sparknet-killswitch.py` — the KillSwitch
 
 The cluster-wide containment control. It is **root-gated in both modes** and
@@ -435,6 +443,7 @@ changing nothing when they do**.
 | `sparknet-registry-sign-socket.sh` | Sign a registry entry **through the signer socket**, recording a ledger block. |
 | `sparknet-registry-verify.sh` | Verify a registry. |
 | `sparknet-rfi-answer.sh` | Answer a queued RFI request: sign the answer, bind its digest, and address it to the requesting peer. |
+| `services/sparknet-rfi-responder.py` | Search only the allow-listed fabric corpus, enforce the request scope, and sign/deliver an answer. Staged, not enabled. |
 | `sparknet-registry-publish.sh` | Sign+emit a registry **publication** (`<out>/current.json`). |
 | `sparknet-registry-deliver.sh` | Push a signed publication to the peers' guards on 9090. |
 | `sparknet-registry-revoke.sh` | Sign a **revoked** entry for an identity. |
@@ -680,7 +689,7 @@ The suite:
 
 ### 12.3 The plan
 
-`plans/MASTER_BUILD_PLAN.md` is this role's source of truth, and it is a
+`PLAN.md` is this role's source of truth, and it is a
 **Plan Protocol** plan: a `current:` cursor marks the step being worked, a
 step is marked complete only after its DoD is verified, and every transition
 appends a line to `log.md`.
@@ -826,7 +835,7 @@ decision.
 | The admin console cannot sign | By design. It composes a request; the signer decides. | `manifests/admin-surface.json`; `--socket` signing via `sparknet-registry-sign-socket.sh`. |
 | `make shims-check` fails | A legacy category name is a real directory, not a symlink. | `make env-init` recreates the shims. |
 | `make wiki-preflight` fails | The nearest `.env` is missing, so the skills would resolve a *different* vault. | `make env-init`. Never work around it. |
-| `make spec-check` fails | The spec/impl boundary rotted: a surface moved without the plan or the docs moving with it. | `plans/MASTER_BUILD_PLAN.md`; `docs/unverifiable-claims.md`. |
+| `make spec-check` fails | The spec/impl boundary rotted: a surface moved without the plan or the docs moving with it. | `PLAN.md`; `docs/unverifiable-claims.md`. |
 | A peer refuses the registry | The peer's pinned Master key does not match the signer, or the entry's validity window has closed. | `make registry-verify`; the entry's `issued_at`/`expires_at`. |
 | The KillSwitch only prints a plan | Dry-run is the default. | `make killswitch FORCE=1` as root; `docs/killswitch-template.md`. |
 
@@ -886,3 +895,8 @@ trying.
 | **KillSwitch** | The cluster-wide, root-gated containment and teardown. Master-side; no revoke. |
 | **Containment** | One node's own root-gated teardown. Peer-side. A different thing. |
 | **Spec-only** | Designed and contracted, no code, by deliberate role boundary. |
+
+## Fleet memory
+
+See `docs/memory.md` for the signed `memory-supervise` read-through,
+policy actions, audit visibility and the no-mirror rule.

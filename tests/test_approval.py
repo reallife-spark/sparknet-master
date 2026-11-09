@@ -110,6 +110,7 @@ def peer_vault(tmp_path: Path, master_state) -> tuple[Path, Path]:
 
     public = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     (vault / "manifests" / "keys" / "master-ed25519.pub.b64").write_text(base64.b64encode(public).decode() + "\n")
+    (vault / "manifests" / "keys" / "master-ed25519.pub.b64").chmod(0o600)
 
     entry = authz.sign_authorization(identity, key, ["telemetry", "p2p-sync", "guard-apply"])
     registry = {

@@ -138,6 +138,7 @@ def peer_vault(tmp_path: Path, master_state, monkeypatch: pytest.MonkeyPatch) ->
         json.dumps({"wireguard": {"master_anchor_ip": "10.100.0.1"}}, indent=2) + "\n"
     )
     (vault / "manifests" / "keys" / "master-ed25519.pub.b64").write_text(_public_b64(master_key) + "\n")
+    (vault / "manifests" / "keys" / "master-ed25519.pub.b64").chmod(0o600)
 
     # user_init writes the user key into SPARKNET_STATE_DIR; point it at the peer's.
     monkeypatch.setenv("SPARKNET_STATE_DIR", str(state))
@@ -241,7 +242,15 @@ def _start_telemetry_intake(peer_fp: str, spool: Path):
     """The real 8090 telemetry route, loopback-mapped to the destination peer."""
     intake = _load("sparknet_peer_intake_alert", INTAKE)
     directory = intake.PeerDirectory(
-        [{"fingerprint": peer_fp, "overlay_ipv4": "127.0.0.1/32", "capabilities": ["telemetry"]}]
+        [
+            {
+                "fingerprint": peer_fp,
+                "overlay_ipv4": "127.0.0.1/32",
+                "capabilities": ["telemetry"],
+                "issued_at": "2020-01-01T00:00:00Z",
+                "expires_at": "2099-01-01T00:00:00Z",
+            }
+        ]
     )
     server = ThreadingHTTPServer(("127.0.0.1", 0), intake._Handler)
     server.directory = directory
@@ -316,7 +325,17 @@ def content_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _start_intake(peer_fp: str, request_dir: Path):
     """The real 8090 peer intake, loopback-mapped to the destination peer."""
     intake = _load("sparknet_peer_intake_rfi", INTAKE)
-    directory = intake.PeerDirectory([{"fingerprint": peer_fp, "overlay_ipv4": "127.0.0.1/32", "capabilities": []}])
+    directory = intake.PeerDirectory(
+        [
+            {
+                "fingerprint": peer_fp,
+                "overlay_ipv4": "127.0.0.1/32",
+                "capabilities": [],
+                "issued_at": "2020-01-01T00:00:00Z",
+                "expires_at": "2099-01-01T00:00:00Z",
+            }
+        ]
+    )
     server = ThreadingHTTPServer(("127.0.0.1", 0), intake._Handler)
     server.directory = directory
     server.spool = request_dir.parent / "telemetry.jsonl"
@@ -774,6 +793,7 @@ def test_a_vault_with_no_user_record_refuses_cleanly_before_writing(master_state
         json.dumps({"wireguard": {"master_anchor_ip": "10.100.0.1"}}, indent=2) + "\n"
     )
     (vault / "manifests" / "keys" / "master-ed25519.pub.b64").write_text(_public_b64(master_key) + "\n")
+    (vault / "manifests" / "keys" / "master-ed25519.pub.b64").chmod(0o600)
 
     state = tmp_path / "bare-state"
     state.mkdir()

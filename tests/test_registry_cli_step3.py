@@ -41,6 +41,10 @@ def has_keys() -> bool:
 needs_keys = pytest.mark.skipif(not has_keys(), reason="need keys")
 
 
+def _op_pub() -> str:
+    return (state_dir() / "keys" / "operational.pub.b64").read_text().strip()
+
+
 @needs_keys
 def test_make_targets_exist_and_run(tmp_path):
     # authz-sign
@@ -64,7 +68,14 @@ def test_make_targets_exist_and_run(tmp_path):
     # registry verify
     reg = tmp_path / "r.json"
     reg.write_text(
-        json.dumps({"role": "registry", "schema_version": "1.0.0", "authorizations": [json.loads(ent.read_text())]})
+        json.dumps(
+            {
+                "role": "registry",
+                "schema_version": "1.0.0",
+                "master_public_key_b64": _op_pub(),
+                "authorizations": [json.loads(ent.read_text())],
+            }
+        )
     )
     subprocess.run(["make", "-C", str(ROLE_ROOT), "registry-verify", f"REGISTRY={reg}"], check=True)
     # wg render

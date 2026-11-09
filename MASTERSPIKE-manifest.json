@@ -41,7 +41,7 @@
         "why": "The declared admin topology, including the capability this surface is not allowed."
       },
       {
-        "path": "master-node/plans/MASTER_BUILD_PLAN.md",
+        "path": "master-node/PLAN.md",
         "why": "The work order and its current cursor."
       },
       {

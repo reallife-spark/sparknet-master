@@ -206,3 +206,18 @@ def test_an_expired_entry_is_never_rendered(tmp_path):
     )
     txt = wg.read_text()
     assert "[Peer]" not in txt, f"an expired entry was rendered:\n{txt}"
+
+
+@needs_keys
+def test_registry_and_out_paths_cannot_inject_python(tmp_path):
+    reg = tmp_path / "reg'quote.json"
+    reg.write_text(json.dumps({"schema_version": "1.0.0", "authorizations": []}))
+    out = tmp_path / "out'quote.conf"
+    marker = tmp_path / "pwned"
+    subprocess.run(
+        ["make", "-C", str(ROLE_ROOT), "wg-render-master", f"REGISTRY={reg}", f"OUT={out}"],
+        check=True,
+        capture_output=True,
+    )
+    assert out.is_file()
+    assert not marker.exists()

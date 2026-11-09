@@ -8,8 +8,8 @@ status: superseded
 
 > [!warning] **Superseded and non-authoritative.** This page is a 2026-10-03
 > snapshot; its "Now" item (verify the scaffold) closed long ago. The cursor and
-> work order live in [`MASTER_BUILD_PLAN.md`](MASTER_BUILD_PLAN.md), and
-> [`../MEMORY.md`](../MEMORY.md) mirrors only the standing state. Do not treat
+> work order live in [`../../PLAN.md`](../../PLAN.md), and
+> [`../../MEMORY.md`](../../MEMORY.md) mirrors only the standing state. Do not treat
 > the checkboxes below as current.
 
 ## Now

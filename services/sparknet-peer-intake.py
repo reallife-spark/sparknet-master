@@ -98,6 +98,7 @@ REFUSAL_STATUS = {
     "off_overlay": 403,
     "revoked": 403,
     "capability_missing": 403,
+    "unsigned_entry": 403,
     "malformed": 400,
     "wrong_peer": 403,
     "expired": 403,
@@ -149,8 +150,11 @@ class PeerDirectory:
     that would otherwise attribute it.
     """
 
-    def __init__(self, entries: list[dict[str, Any]]) -> None:
+    def __init__(self, entries: list[dict[str, Any]], master_key: Any | None = None) -> None:
         self._by_address: dict[str, dict[str, Any]] = {}
+        self._master_key = master_key
+        self._path: Path | None = None
+        self._mtime_ns = 0
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
@@ -161,7 +165,32 @@ class PeerDirectory:
 
     @classmethod
     def from_registry(cls, path: Path | str) -> PeerDirectory:
-        return cls(load_registry(path))
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+        encoded = document.get("master_public_key_b64") if isinstance(document, dict) else None
+        if not isinstance(encoded, str) or not encoded:
+            raise IntakeError("registry has no master_public_key_b64")
+        directory = cls(load_registry(path), authz.public_key_from_b64(encoded))
+        directory._path = Path(path)
+        directory._mtime_ns = directory._path.stat().st_mtime_ns
+        return directory
+
+    def _refresh(self) -> None:
+        if self._path is None:
+            return
+        try:
+            mtime = self._path.stat().st_mtime_ns
+            if mtime == self._mtime_ns:
+                return
+            document = json.loads(self._path.read_text(encoding="utf-8"))
+            encoded = document.get("master_public_key_b64") if isinstance(document, dict) else None
+            if not isinstance(encoded, str) or not encoded:
+                raise IntakeError("registry has no master_public_key_b64")
+            fresh = PeerDirectory(load_registry(self._path), authz.public_key_from_b64(encoded))
+            self._by_address = fresh._by_address
+            self._master_key = fresh._master_key
+            self._mtime_ns = mtime
+        except (OSError, ValueError, json.JSONDecodeError, IntakeError) as exc:
+            raise IntakeError(f"registry reload failed: {exc}") from exc
 
     def attribute(self, client_address: str, *, capability: str | None = "telemetry") -> tuple[str | None, str]:
         """(fingerprint, "") for an accepted source, else (None, reason).
@@ -174,11 +203,41 @@ class PeerDirectory:
         nothing more. It is not a bypass — the overlay still authenticates the
         source and the literal fingerprint still has to match the body.
         """
+        try:
+            self._refresh()
+        except IntakeError:
+            return None, "off_overlay"
         entry = self._by_address.get(_bare(client_address))
         if entry is None:
             return None, "off_overlay"
+        if self._master_key is not None:
+            try:
+                if not authz.verify_signature(
+                    self._master_key,
+                    str(entry.get("signature_b64") or ""),
+                    authz.authorization_message(entry),
+                ):
+                    return None, "unsigned_entry"
+            except Exception:
+                return None, "unsigned_entry"
         if entry.get("revoked"):
             return None, "revoked"
+        try:
+            from datetime import datetime, timezone
+
+            now = datetime.now(timezone.utc)
+            issued = datetime.fromisoformat(str(entry.get("issued_at") or "").replace("Z", "+00:00"))
+            expires = datetime.fromisoformat(str(entry.get("expires_at") or "").replace("Z", "+00:00"))
+            if issued.tzinfo is None:
+                issued = issued.replace(tzinfo=timezone.utc)
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if now < issued:
+                return None, "not_yet_valid"
+            if now >= expires:
+                return None, "expired"
+        except ValueError:
+            return None, "malformed"
         if capability is not None:
             capabilities = entry.get("capabilities")
             if not isinstance(capabilities, list) or capability not in capabilities:

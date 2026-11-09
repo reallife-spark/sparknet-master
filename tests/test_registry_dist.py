@@ -108,6 +108,7 @@ def peer_vault(tmp_path: Path, master_state) -> Path:
         json.dumps({"wireguard": {"master_anchor_ip": "10.100.0.1"}}, indent=2) + "\n"
     )
     (vault / "manifests" / "keys" / "master-ed25519.pub.b64").write_text(_public_b64(key) + "\n")
+    (vault / "manifests" / "keys" / "master-ed25519.pub.b64").chmod(0o600)
     return vault
 
 
@@ -309,6 +310,67 @@ def test_replaying_an_older_publication_is_refused(
     assert not authz.evaluate(_identity(), _installed_registry(peer_vault), key.public_key(), now=_now()).allowed
 
 
+def test_redelivering_the_same_publication_is_a_no_op(
+    master_state, peer_vault: Path, running_guard: int, tmp_path: Path
+) -> None:
+    """The steady state of the re-delivery timer, which used to be a red unit.
+
+    The Master pushes the current publication every 60 s. A peer that already
+    installed that exact sequence must answer success, not a replay refusal:
+    otherwise the delivery unit fails on every tick forever. An equal sequence
+    with a *different* registry is still a fork and stays refused.
+    """
+    state, key = master_state
+    fingerprint = _fingerprint(peer_vault)
+    url = f"http://127.0.0.1:{running_guard}{PUBLICATION_ROUTE}"
+
+    out = tmp_path / "pub"
+    assert _publish(state, _registry(key, _identity()), out).returncode == 0
+    assert _deliver(out / "current.json", fingerprint, url).returncode == 0
+    again = _deliver(out / "current.json", fingerprint, url)
+    assert again.returncode == 0, again.stdout + again.stderr
+    record = json.loads(again.stdout)
+    assert record["peers"][0]["status"] == 200
+    assert "REGISTRY_ALREADY_INSTALLED" in record["peers"][0]["response"]
+    assert _status(running_guard)["registry_sequence"] == 1
+
+
+def test_the_master_anchor_is_not_a_delivery_target(master_state, peer_vault: Path, tmp_path: Path) -> None:
+    """A registry entry for the Master itself must not make delivery fail.
+
+    The Master sits at the overlay anchor, which is reserved and never
+    assignable to a peer. There is no guard there, so POSTing to it cannot
+    succeed; the deliverer records the skip instead of turning the timer red.
+    """
+    state, key = master_state
+    master_identity = {
+        "node_id": "master-test",
+        "role": "master",
+        "wireguard_public_key_b64": base64.b64encode(b"\x22" * 32).decode(),
+        "overlay_ipv4": "10.100.0.1",
+        "requested_capabilities": ["telemetry"],
+    }
+    out = tmp_path / "pub"
+    assert _publish(state, _registry(key, master_identity), out).returncode == 0
+
+    delivered = subprocess.run(
+        [
+            str(ROLE_ROOT / "scripts" / "sparknet-registry-deliver.sh"),
+            "--publication",
+            str(out / "current.json"),
+            "--timeout",
+            "2",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert delivered.returncode == 0, delivered.stdout + delivered.stderr
+    record = json.loads(delivered.stdout)
+    assert record["ok"] is True
+    assert [peer["skipped"] for peer in record["peers"]] == ["master_anchor"]
+    assert record["peers"][0]["delivered"] is False
+
+
 def test_tampered_content_is_refused_before_install(
     master_state, peer_vault: Path, running_guard: int, tmp_path: Path
 ) -> None:
@@ -428,12 +490,14 @@ def test_offline_client_installs_the_same_way(master_state, peer_vault: Path, tm
     assert report["sequence"] == 1
     assert "guard-apply" in report["capabilities"]
 
-    # A replay is refused with the same code the guard sends.
-    replay = subprocess.run(
+    # Re-installing the publication that is already installed is a no-op, not a
+    # refusal: this is what a re-delivery pass does. A *lower* sequence stays a
+    # rollback refusal (covered by the guard test above).
+    again = subprocess.run(
         ["bash", str(PEER_ROLE / "scripts" / "sparknet-registry-fetch.sh"), "--publication", str(out / "current.json")],
         capture_output=True,
         text=True,
         env=env,
     )
-    assert replay.returncode == 1
-    assert "stale_publication" in replay.stderr
+    assert again.returncode == 0, again.stderr
+    assert "already installed" in again.stdout

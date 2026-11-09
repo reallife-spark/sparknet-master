@@ -37,7 +37,7 @@ things:
 The user has directed that the Master also **administers** the fabric's
 infrastructure: git, file sharing, NAT and the vector embeddings database.
 "Administers" is a role responsibility, not an existence claim — all four are
-`implementation_state: spec-only` in `contracts/ports.json` (`4220`–`4223`,
+`implementation_state: implemented` for all four as of 2026-10-31 in `contracts/ports.json` (`4220`–`4223`;
 `bound_by: master`, `overlay_only`, bound to `10.100.0.1`). The scoping is
 [`../plans/MASTER_ADMIN_PLAN.md`](../plans/MASTER_ADMIN_PLAN.md).
 
@@ -59,10 +59,10 @@ infrastructure service may not load, invoke or proxy to the signing key.
 | Peer intake (`8090`) | peer→Master telemetry evidence and RFI requests | **built (fabric Steps 69C, 70B)** — `services/sparknet-peer-intake.py`, overlay-only, attributed by the registry. Telemetry is `telemetry`-gated and recorded; an RFI request needs only a registered, non-revoked peer and is queued for the composer, never answered here. Both act on nothing. The old instant-push purpose was superseded by Step 6's 9090 registry push and is retired; the unit is staged, not enabled | 7 → fabric 69C |
 | Cluster KillSwitch | fabric-wide containment | **built (Step 8); live run unverified** — `services/sparknet-killswitch.py` root-gates, defaults to dry-run, stops the control units and admin container, removes the overlay, and installs the `SPARKNET_EMERG_*` iptables chains without flushing the host ruleset. Fake-runner tests pass; the destructive run on a real Master is `DoD: confirm: user` | 8 |
 | Nocturnal batch scheduler | idle evidence + a time-boxed batch lease | **9A adopted, 9B built (2026-10-25), 9C built (2026-10-26)** — `plans/NOCTURNAL_BATCH_DESIGN.md` replaces literal pooled memory with whole-node jobs on idle nodes; `shared/sparknet-idle.py` collects session/GPU evidence into telemetry `metrics.idle`; `services/sparknet-wg-observer.py` supplies authoritative WireGuard deltas from a root snapshot; `services/sparknet-scheduler.py` implements `plan`/`arm`/`status`/`abort`, three-sample gating, the 02:00–05:00 window and two-step confirmation. Assignments are `[]` until 9D; no dispatch occurs | 9 |
-| Share ratification | ratify a peer's time-boxed share | **not built / gated** — `services/sparknet-share-ratify.py` scaffold; `4203` is `spec-only`/`not-listening` (test guard) | 10 |
+| Share ratification | ratify a peer's time-boxed share | **built / not enabled on the pair** — `services/sparknet-share-ratify.py` has a signed 4203 listener and human queue; no unit is enabled | 10 |
 | Evidence/review repository | make share events reviewable | **not built** — the hash-chained ledger verifies, but no share events feed a repository and there is no retention policy or clone-and-compare path | 11 |
 | Review agents and trust decisions | produce findings and signed trust transitions | **not built** — no review service or finding producer; 70G only *surfaces* a retained flag, never decides | 12 |
-| Git / file share / NAT / vector DB (`4220`–`4223`) | infrastructure administration | **not built** — all four are `spec-only` in `contracts/ports.json` | `MASTER_ADMIN_PLAN.md` |
+| Git / file share / NAT / vector DB (`4220`–`4223`) | infrastructure administration | **all four built/live 2026-10-31**; `4220`/`4221` are read-only, `4222` is status/dry-run, `4223` is signed query-only | `MASTER_ADMIN_PLAN.md` |
 
 ## The signing path
 

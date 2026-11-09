@@ -11,7 +11,10 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import socket
+import subprocess
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
@@ -196,10 +199,10 @@ def test_a_duplicate_share_id_is_refused(
     ratify: ModuleType, authz: ModuleType, master_key: Ed25519PrivateKey, tmp_path: Path
 ) -> None:
     service = _ratifier(ratify, authz, _registry(tmp_path, authz, master_key), master_key)
-    request = _request(authz, master_key)
-    service.accept_share_request(request)
+    service.accept_share_request(_request(authz, master_key))
+    second = _request(authz, master_key, grant=_grant(authz, master_key, nonce="n2"))
     with pytest.raises(ratify.ShareRatifyError, match="duplicate-share"):
-        service.accept_share_request(request)
+        service.accept_share_request(second)
 
 
 def test_a_share_can_only_be_decided_once(
@@ -210,3 +213,117 @@ def test_a_share_can_only_be_decided_once(
     service.ratify("share-1")
     with pytest.raises(ratify.ShareRatifyError, match="already-decided"):
         service.ratify("share-1")
+
+
+def test_the_approval_queue_survives_a_restart(
+    ratify: ModuleType, authz: ModuleType, master_key: Ed25519PrivateKey, tmp_path: Path
+) -> None:
+    state = tmp_path / "queue.json"
+    registry = _registry(tmp_path, authz, master_key)
+    first = ratify.ShareRatifier(
+        registry,
+        signer=lambda envelope: authz.sign_share_ratification(envelope, master_key),
+        authz=authz,
+        clock=lambda: CLOCK,
+        state_path=state,
+    )
+    first.accept_share_request(_request(authz, master_key))
+
+    second = ratify.ShareRatifier(registry, authz=authz, clock=lambda: CLOCK, state_path=state)
+    assert second.pending["share-1"]["status"] == "pending"
+    second.signer = lambda envelope: authz.sign_share_ratification(envelope, master_key)
+    second.ratify("share-1")
+
+    third = ratify.ShareRatifier(registry, authz=authz, clock=lambda: CLOCK, state_path=state)
+    assert third.pending == {}
+    assert third.ratifications["share-1"]["status"] == "ratified"
+
+
+def _free_port() -> int:
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def test_4203_queues_a_signed_request_and_never_ratifies_it(
+    ratify: ModuleType, authz: ModuleType, master_key: Ed25519PrivateKey, tmp_path: Path
+) -> None:
+    http = _load("share_ratify_http_test", SHARED / "sparknet-http.py")
+    peer_key = Ed25519PrivateKey.generate()
+    service = ratify.ShareRatifier(
+        _registry(tmp_path, authz, master_key),
+        authz=authz,
+        clock=lambda: CLOCK,
+        state_path=tmp_path / "queue.json",
+    )
+    port = _free_port()
+    server = http.serve(
+        ratify._ratify_router(service),
+        bind="127.0.0.1",
+        port=port,
+        public_keys={"peer-1": peer_key.public_key()},
+    )
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
+    thread.start()
+    try:
+        status, body = http.post_json(
+            f"http://127.0.0.1:{port}",
+            "POST",
+            "/v1/share/request",
+            {"request": _request(authz, master_key)},
+            peer_key,
+        )
+        assert status == 202, body
+        assert body["status"] == "pending"
+        assert body["queue"] == "human-approval-required"
+        assert service.pending["share-1"]["status"] == "pending"
+        assert service.ratifications == {}
+
+        status, body = http.post_json(
+            f"http://127.0.0.1:{port}",
+            "POST",
+            "/v1/share/request",
+            {"request": _request(authz, master_key, share_id="share-2")},
+            Ed25519PrivateKey.generate(),
+        )
+        assert status == 401
+
+        status, body = http.post_json(
+            f"http://127.0.0.1:{port}",
+            "POST",
+            "/v1/share/request",
+            {"request": _request(authz, master_key, share_id="share-3", node_id="peer-2")},
+            peer_key,
+        )
+        assert status == 403
+        assert body["reason"] == "key-mismatch"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+def test_the_rendered_4203_unit_queues_but_never_signs() -> None:
+    proc = subprocess.run(
+        ["make", "-C", str(ROLE_ROOT), "share-ratify-unit"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    unit = proc.stdout
+    assert "4203" in unit and "--serve" in unit
+    assert "--trusted-key-dir" in unit and "--state" in unit
+    assert "--approve" not in unit and "--signer-socket" not in unit
+
+
+def test_a_consumed_grant_nonce_cannot_create_a_second_share(
+    ratify: ModuleType, authz: ModuleType, master_key: Ed25519PrivateKey, tmp_path: Path
+) -> None:
+    service = _ratifier(ratify, authz, _registry(tmp_path, authz, master_key), master_key)
+    grant = _grant(authz, master_key)
+    service.accept_share_request(_request(authz, master_key, grant=grant))
+    with pytest.raises(ratify.ShareRatifyError, match="grant_nonce_reused"):
+        service.accept_share_request(_request(authz, master_key, share_id="share-2", grant=grant))

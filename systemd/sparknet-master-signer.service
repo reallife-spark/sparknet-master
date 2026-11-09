@@ -33,7 +33,19 @@ ExecStart=/usr/bin/env python3 %h/services/sparknet-signer.py \
     --key ${SPARKNET_STATE_DIR}/keys/operational.ed25519 \
     --root ${SPARKNET_STATE_DIR}/trust-root.json \
     --socket ${SPARKNET_STATE_DIR}/signer/signer.sock \
-    --ledger %h/blockchain/ledger.json
+    --ledger %h/blockchain/ledger.json \
+    --allow-caller %h/services/sparknet-admin-console.py \
+    --allow-caller %h/services/sparknet-distill.py \
+    --allow-caller %h/services/sparknet-evidence-capture.py \
+    --allow-caller %h/services/sparknet-review-agents.py \
+    --allow-caller %h/services/sparknet-scheduler.py \
+    --allow-caller %h/services/sparknet-share-ratify.py \
+    --allow-caller %h/scripts/sparknet-signer-probe.sh \
+    --allow-caller %h/scripts/sparknet-registry-sign-socket.sh \
+    --allow-caller %h/scripts/sparknet-registry-publish.sh \
+    --allow-caller %h/scripts/sparknet-approval-sign-socket.sh \
+    --allow-caller %h/scripts/sparknet-rfi-answer.sh \
+    --allow-caller %h/scripts/sparknet-share-ratify-unit.sh
 Restart=on-failure
 RestartSec=5
 

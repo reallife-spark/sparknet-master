@@ -1,0 +1,23 @@
+# The private image distribution surface. It serves a content-addressed root,
+# never builds or signs an image, and refuses a non-loopback bind.
+#
+# Staged, not enabled: the token file at ${SPARKNET_STATE_DIR}/registry-token is
+# an operator-created 0600 secret, and bringing an image-serving socket up is a
+# separate decision from installing the unit.
+[Unit]
+Description=Sparknet private OCI registry (loopback, token-gated, read-only)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.env
+ExecStart=/usr/bin/env python3 %h/services/sparknet-container-registry.py \
+    --root ${SPARKNET_STATE_DIR}/registry \
+    --bind 127.0.0.1 \
+    --port 5000 \
+    --token-file ${SPARKNET_STATE_DIR}/registry-token
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

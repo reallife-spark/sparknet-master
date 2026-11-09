@@ -67,6 +67,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, NamedTuple
 
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 
 #: The peer bridge's admin HTTP port (contracts/ports.json). Loopback today;
@@ -116,6 +124,10 @@ REQUIRED_ENTITY: dict[str, tuple[str, ...]] = {
     "list_knowledge": (),
     "get_user_chats": ("user_id",),
     "list_events": (),
+    "memory_status": (),
+    "memory_policy_set": ("policy",),
+    "memory_read": (),
+    "memory_purge": ("memory_ids",),
 }
 
 #: CLI verb -> admin action. `feed` is handled separately (it fans out over nodes).
@@ -127,6 +139,10 @@ VERB_ACTIONS: dict[str, str] = {
     "knowledge": "list_knowledge",
     "chats": "get_user_chats",
     "events": "list_events",
+    "memory": "memory_status",
+    "memory-policy": "memory_policy_set",
+    "memory-read": "memory_read",
+    "memory-purge": "memory_purge",
 }
 
 
@@ -178,6 +194,32 @@ def load_authz(shared_dir: Path | None = None):
 # --- composing a request ------------------------------------------------------
 
 
+def _json_list(value: Any) -> list[Any]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return value
+    try:
+        parsed = json.loads(str(value))
+        if isinstance(parsed, list):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
 def compose_request(
     authz,
     *,
@@ -222,6 +264,12 @@ def compose_request(
         "role": entity.get("role"),
         "kb_id": entity.get("kb_id"),
         "chat_id": entity.get("chat_id"),
+        "memory_query": entity.get("memory_query"),
+        "memory_types": _json_list(entity.get("memory_types")),
+        "memory_ids": _json_list(entity.get("memory_ids")),
+        "project_id": entity.get("project_id"),
+        "policy": _json_object(entity.get("policy")),
+        "reason": entity.get("reason"),
     }
     try:
         authz.admin_request_message(request)
@@ -355,7 +403,7 @@ def dispatch(
     endpoint = target.url.rstrip("/") + ADMIN_PATH_PREFIX + action
     body = json.dumps(signed_request).encode("utf-8")
     request = urllib.request.Request(endpoint, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    open_url = opener or urllib.request.urlopen
+    open_url = opener or _NO_REDIRECT_OPENER.open
     try:
         with open_url(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
@@ -584,11 +632,17 @@ class Console:
 # --- CLI ----------------------------------------------------------------------
 
 
-def build_entity(action: str, tokens: list[str]) -> dict[str, Any]:
+def build_entity(action: str, tokens: list[str], extras: list[str] | None = None) -> dict[str, Any]:
     fields = REQUIRED_ENTITY[action]
     if len(tokens) < len(fields):
         raise ConsoleError(f"{action} needs {', '.join(fields)}")
-    return dict(zip(fields, tokens, strict=False))
+    entity = dict(zip(fields, tokens, strict=False))
+    for item in extras or []:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            raise ConsoleError(f"--entity must be key=value, got {item!r}")
+        entity[key] = value
+    return entity
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -604,6 +658,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--master-node-id", default=os.environ.get("SPARKNET_NODE_ID", ""))
     parser.add_argument("--ttl", type=int, default=DEFAULT_ADMIN_TTL_SECONDS)
     parser.add_argument("--node", action="append", default=[], help="feed target (repeatable)")
+    parser.add_argument(
+        "--entity", dest="entity_extra", action="append", default=[], help="extra entity field key=value"
+    )
     parser.add_argument("--dry-run", action="store_true", help="compose but do not sign or send")
     parser.add_argument("--ping", action="store_true", help="ping KDE devices with the feed summary")
     parser.add_argument("--json", action="store_true", help="emit JSON")
@@ -644,7 +701,7 @@ def main(argv: list[str] | None = None) -> int:
             # The target names the node to talk to; it is NOT an entity field.
             # Prepending it here sent `user_id: "<node>"` and the peer refused
             # every user_id action as an unknown user (found live 2026-10-12).
-            entity = build_entity(action, args.entity)
+            entity = build_entity(action, args.entity, args.entity_extra)
             result = console.send(action, spec=args.target, entity=entity)
     except ConsoleError as exc:
         print(f"[console] {exc}", file=sys.stderr)

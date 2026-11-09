@@ -1,0 +1,1 @@
+../../../peer-node/.opencode/agents/project-researcher.md

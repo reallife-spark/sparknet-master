@@ -1,0 +1,56 @@
+{
+  "schema": "sparknet-console/1",
+  "role": "master",
+  "node": "agx32",
+  "title": "Sparknet Master",
+  "menus": [
+    "mesh",
+    "vectors",
+    "learning",
+    "memory",
+    "projects"
+  ],
+  "bind": "127.0.0.1",
+  "port": 8098,
+  "token_file": ".state/webui/console.token",
+  "qdrant": {
+    "uri": "http://127.0.0.1:6333",
+    "api_key_file": ".state/qdrant.api.key",
+    "allowed_collections": [
+      "sparknet-fabric",
+      "sparknet-shared",
+      "sparknet-distill-map"
+    ],
+    "excluded_prefixes": [
+      "uplift-",
+      "sparknet-inventory",
+      "sparknet-traces",
+      "sparknet-kv"
+    ],
+    "map_collections": [
+      "sparknet-fabric",
+      "sparknet-shared",
+      "sparknet-distill-map"
+    ]
+  },
+  "paths": {
+    "identity": "manifests/master-identity.json",
+    "registry": "manifests/node-authorizations.json",
+    "ledger": "blockchain/ledger.json",
+    "share_regime": "manifests/share-regime.json",
+    "telemetry": "/mnt/log/sparknet-telemetry.jsonl",
+    "admin_events": ".state/admin-events/events.jsonl",
+    "rfi_dir": ".state/rfi-requests"
+  },
+  "distill": {
+    "config": "configs/distill.json",
+    "state": "/srv/sparknet/distill",
+    "status_file": ".state/webui/distill-status.json"
+  },
+  "openwebui_url": "http://10.100.0.1:8088",
+  "memory": {
+    "gateway_url": "http://127.0.0.1:4093",
+    "local_token_file": ".state/memory.local.token",
+    "vault_path": "."
+  }
+}

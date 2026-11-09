@@ -44,7 +44,7 @@ VAULT_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = VAULT_ROOT.parent
 MANIFEST = VAULT_ROOT / "manifests" / "master-identity.json"
 NODE_IDENTITY = VAULT_ROOT / "manifests" / "node-identity.json"
-PLAN = VAULT_ROOT / "plans" / "MASTER_BUILD_PLAN.md"
+PLAN = VAULT_ROOT / "plans" / "archive" / "MASTER_BUILD_PLAN_FULL_2026-10-30.md"
 
 #: The three keypairs keygen mints. The split is the security model, so its shape
 #: is part of this step's DoD rather than an implementation detail.

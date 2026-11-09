@@ -1,11 +1,13 @@
 # Nocturnal batch scheduler — independent nodes, one time-boxed lease
 
-Status: **9A adopted, 9B implemented (2026-10-25), 9C implemented (2026-10-26), 9D blocked (2026-10-26), 9E–9G open.** This
+Status: **9A adopted, 9B implemented (2026-10-25), 9C implemented (2026-10-26), 9D task ingress (2026-10-28), 9E/9F implemented (2026-11-04), 9G live window open; Step 9 reopened 2026-11-03.** The
 note supersedes the literal reading of `MASTER_BUILD_PLAN.md` Step 9. It creates
 no port, grants no capability and adds no scheduler daemon. 9B added the shared
 idle collector and the telemetry `metrics.idle` fields. 9C adds the root
 WireGuard observer and the `plan`/`arm`/`status`/`abort` lease state machine;
-it still dispatches nothing and the service/timer are staged, not enabled.
+it still dispatches nothing by itself; the explicit `dispatch` verb requires an
+ARMED lease and the isolated signer. 9E/9F are implemented; 9G is the live
+operator window.
 
 ## 1. The premise that does not survive contact with the fleet
 
@@ -246,11 +248,18 @@ The design note itself adopts nothing.
    dispatch bridge loopback as of 2026-10-28 (`/v1/cluster/submit|status|result`,
    acceptance checks, execute disabled by default) but construction/placement/reduce
    remain unadopted; no scheduler dispatch integration.
-5. **9E — artifact commits.** Signed manifest, vault intake path, local commit,
-   review-only handoff, and the refusal to promote automatically.
-6. **9F — optional timer.** A timer may probe and notify; it may not arm.
-7. **9G — live deploy.** A two-node window on `agx64`/`agx32` with an operator
-   present. This remains `DoD: confirm: user` after Step 8's live leg.
+5. **9E — artifact commits.** Implemented 2026-11-04:
+   `contracts/nocturnal-artifact-schema.json` and
+   `shared/sparknet-nocturnal.py` write signed results/manifests under
+   `01_Inbox/nocturnal/<lease_id>/<job_id>/`, with coverage, a state-dir git
+   repository and no automatic promotion.
+6. **9F — optional timer.** Implemented 2026-11-04:
+   `sparknet-nocturnal-probe.service`/`.timer` runs `scheduler status --notify`
+   and has no path to `plan` or `arm`.
+7. **9G — live deploy.** The signed dispatcher, placement, peer execution and
+   reduce are implemented and locally tested. A two-node window on
+   `agx64`/`agx32` with an operator present remains `DoD: confirm: user`; the
+   scheduler only permits 02:00–05:00 local.
 
 ## 9. Replacement DoD for Step 9
 

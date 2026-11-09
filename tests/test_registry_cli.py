@@ -45,6 +45,10 @@ def has_keys() -> bool:
 needs_keys = pytest.mark.skipif(not has_keys(), reason="need keys")
 
 
+def _op_pub() -> str:
+    return (state_dir() / "keys" / "operational.pub.b64").read_text().strip()
+
+
 @needs_keys
 def test_authz_sign_produces_valid_entry(tmp_path):
     ident = tmp_path / "id.json"
@@ -93,7 +97,14 @@ def test_registry_verify_ok(tmp_path):
     )
     reg = tmp_path / "r.json"
     reg.write_text(
-        json.dumps({"role": "registry", "schema_version": "1.0.0", "authorizations": [json.loads(ent.read_text())]})
+        json.dumps(
+            {
+                "role": "registry",
+                "schema_version": "1.0.0",
+                "master_public_key_b64": _op_pub(),
+                "authorizations": [json.loads(ent.read_text())],
+            }
+        )
     )
     res = subprocess.run(
         ["make", "-C", str(ROLE_ROOT), "registry-verify", f"REGISTRY={reg}"], capture_output=True, text=True, check=True
@@ -123,7 +134,14 @@ def test_wg_render_limits_to_32(tmp_path):
     )
     reg = tmp_path / "r.json"
     reg.write_text(
-        json.dumps({"role": "registry", "schema_version": "1.0.0", "authorizations": [json.loads(ent.read_text())]})
+        json.dumps(
+            {
+                "role": "registry",
+                "schema_version": "1.0.0",
+                "master_public_key_b64": _op_pub(),
+                "authorizations": [json.loads(ent.read_text())],
+            }
+        )
     )
     wg = tmp_path / "wg0.conf"
     subprocess.run(
@@ -134,3 +152,32 @@ def test_wg_render_limits_to_32(tmp_path):
     assert wg.is_file()
     txt = wg.read_text()
     assert "AllowedIPs = 10.100.0.11/32" in txt
+
+
+@needs_keys
+def test_capabilities_cannot_inject_python_code(tmp_path):
+    """CAPS used to be interpolated into a Python here-doc after the key load."""
+    ident = tmp_path / "id.json"
+    ident.write_text(
+        json.dumps(
+            {
+                "node_id": "inject",
+                "role": "peer",
+                "wireguard_public_key_b64": "D" * 44,
+                "overlay_ipv4": "10.100.0.12/32",
+                "requested_capabilities": ["telemetry"],
+            }
+        )
+    )
+    marker = tmp_path / "pwned"
+    caps = f"telemetry'); open('{marker}', 'w').write('owned'); ('"
+    out = tmp_path / "e.json"
+    result = subprocess.run(
+        ["make", "-C", str(ROLE_ROOT), "authz-sign", f"IDENTITY={ident}", f"CAPS={caps}", f"OUT={out}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert not marker.exists()
+    assert not out.exists()

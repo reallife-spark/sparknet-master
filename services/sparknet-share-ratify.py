@@ -15,10 +15,14 @@ placeholder. A live listener on 4203 is a deployment leg (`DoD: confirm: user`).
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
+import signal
 import socket
 import sys
+import tempfile
+import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +34,7 @@ from sparknet_loader import load_shared  # noqa: E402 - import after the loader 
 
 DEFAULT_REGISTRY = ROLE_ROOT / "manifests" / "node-authorizations.json"
 DEFAULT_DEADLINE_SECONDS = 2 * 60 * 60
+MAX_PENDING = 256
 DECISIONS = ("approve", "approved", "ratify", "ratified", "refuse", "refused")
 
 
@@ -74,14 +79,59 @@ class ShareRatifier:
         authz: Any | None = None,
         clock: Callable[[], datetime] | None = None,
         deadline_seconds: int = DEFAULT_DEADLINE_SECONDS,
+        state_path: str | os.PathLike[str] | None = None,
     ):
         self.registry_path = Path(registry_path) if registry_path else DEFAULT_REGISTRY
         self.signer = signer
         self.authz = authz or _load_authz()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.deadline_seconds = deadline_seconds
+        self.state_path = Path(state_path) if state_path else None
+        self._lock = threading.RLock()
         self.pending: dict[str, dict[str, Any]] = {}
         self.ratifications: dict[str, dict[str, Any]] = {}
+        self.consumed_nonces: set[str] = set()
+        self._load_state()
+
+    def _load_state(self) -> None:
+        if self.state_path is None or not self.state_path.exists():
+            return
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ShareRatifyError("state-corrupt", f"{self.state_path}: {exc}") from exc
+        if not isinstance(state, dict) or state.get("schema") != "sparknet-share-ratify-queue/1":
+            raise ShareRatifyError("state-corrupt", f"{self.state_path} is not a ratification queue")
+        self.pending = {str(k): v for k, v in (state.get("pending") or {}).items() if isinstance(v, dict)}
+        self.ratifications = {str(k): v for k, v in (state.get("ratifications") or {}).items() if isinstance(v, dict)}
+        self.consumed_nonces = {str(value) for value in (state.get("consumed_nonces") or []) if str(value)}
+
+    def _save_state(self) -> None:
+        if self.state_path is None:
+            return
+        self.state_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd, temporary = tempfile.mkstemp(prefix=".ratify.", dir=self.state_path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "schema": "sparknet-share-ratify-queue/1",
+                        "saved_at": _iso(self.clock()),
+                        "pending": self.pending,
+                        "ratifications": self.ratifications,
+                        "consumed_nonces": sorted(self.consumed_nonces),
+                    },
+                    handle,
+                    indent=2,
+                    sort_keys=True,
+                )
+                handle.write("\n")
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, self.state_path)
+        finally:
+            leftover = Path(temporary)
+            if leftover.exists():
+                leftover.unlink()
 
     def _load_registry(self) -> dict[str, Any]:
         try:
@@ -131,7 +181,7 @@ class ShareRatifier:
             master_public_key=self._master_key(registry),
             registry=registry,
             node_identity=entry.get("identity"),
-            consumed_nonces=set(),
+            consumed_nonces=self.consumed_nonces,
             now=now,
         )
         if not decision.allowed:
@@ -145,6 +195,10 @@ class ShareRatifier:
         }
 
     def accept_share_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            return self._accept_share_request(request)
+
+    def _accept_share_request(self, request: dict[str, Any]) -> dict[str, Any]:
         now = self.clock()
         registry = self._load_registry()
         verified = self._verify_acceptance(request, registry, now)
@@ -158,6 +212,11 @@ class ShareRatifier:
             share_id = f"shr-{verified['node_id']}-{int(now.timestamp())}"
         if share_id in self.pending or share_id in self.ratifications:
             raise ShareRatifyError("duplicate-share", f"share {share_id} was already accepted")
+        if len(self.pending) >= MAX_PENDING:
+            raise ShareRatifyError("queue-full", "the pending ratification queue is full")
+        nonce = str(verified["grant"].get("nonce") or "")
+        if not nonce or nonce in self.consumed_nonces:
+            raise ShareRatifyError("replayed-grant", "this grant nonce was already consumed")
         deadline = accepted_at + timedelta(seconds=self.deadline_seconds)
         record = {
             "share_id": share_id,
@@ -171,7 +230,9 @@ class ShareRatifier:
             "status": "pending",
             "flag_retained": True,
         }
+        self.consumed_nonces.add(nonce)
         self.pending[share_id] = record
+        self._save_state()
         return {"ok": True, "share_id": share_id, "status": "pending", "deadline": record["deadline"]}
 
     def _sign(self, ratification: dict[str, Any], registry: dict[str, Any]) -> dict[str, Any]:
@@ -185,6 +246,10 @@ class ShareRatifier:
         return signed
 
     def ratify(self, share_id: str, decision: str = "approve", reason: str = "") -> dict[str, Any]:
+        with self._lock:
+            return self._ratify(share_id, decision, reason)
+
+    def _ratify(self, share_id: str, decision: str, reason: str) -> dict[str, Any]:
         if decision not in DECISIONS:
             raise ShareRatifyError("invalid-decision", f"expected one of {', '.join(DECISIONS)}")
         record = self.pending.get(share_id) or self.ratifications.get(share_id)
@@ -223,6 +288,7 @@ class ShareRatifier:
         }
         self.pending.pop(share_id, None)
         self.ratifications[share_id] = stored
+        self._save_state()
         return {
             "ok": approved,
             "share_id": share_id,
@@ -296,6 +362,124 @@ class SignerClient:
         return response["ratification"]
 
 
+# --- 4203 listener -----------------------------------------------------------
+
+
+def _shared_dir() -> Path:
+    explicit = os.environ.get("SPARKNET_SHARED_DIR", "").strip()
+    if explicit:
+        return Path(explicit)
+    for candidate in (ROLE_ROOT / "shared", ROLE_ROOT.parent / "shared"):
+        if (candidate / "sparknet-http.py").is_file():
+            return candidate
+    return ROLE_ROOT.parent / "shared"
+
+
+def _load_http() -> Any:
+    path = _shared_dir() / "sparknet-http.py"
+    if "sparknet_http_share_ratify" in sys.modules:
+        return sys.modules["sparknet_http_share_ratify"]
+    spec = importlib.util.spec_from_file_location("sparknet_http_share_ratify", path)
+    if spec is None or spec.loader is None:
+        raise ShareRatifyError("missing-implementation", str(path))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["sparknet_http_share_ratify"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _default_state_path() -> Path:
+    explicit = os.environ.get("SPARKNET_RATIFY_STATE", "").strip()
+    if explicit:
+        return Path(explicit)
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
+    return base / "sparknet" / "master-node" / "share-ratify" / "queue.json"
+
+
+def _load_keyring(directory: Path, authz: Any) -> dict[str, Any]:
+    """Load ``<node_id>.pub.b64`` peers; refuse a directory with no keys."""
+    keyring: dict[str, Any] = {}
+    for path in sorted(Path(directory).glob("*.pub.b64")):
+        key_id = path.name[: -len(".pub.b64")]
+        if not key_id:
+            continue
+        try:
+            keyring[key_id] = authz.load_public_key(path)
+        except Exception as exc:
+            raise ShareRatifyError("bad-key", f"{path}: {exc}") from exc
+    if not keyring:
+        raise ShareRatifyError("no-verifier", f"no *.pub.b64 keys in {directory}")
+    return keyring
+
+
+def _status_for(exc: ShareRatifyError) -> int:
+    if exc.reason in ("duplicate-share", "already-decided"):
+        return 409
+    if exc.reason in ("unauthorized", "invalid-grant", "cross-department"):
+        return 403
+    if exc.reason.startswith("registry-"):
+        return 503
+    if exc.reason in ("no-signer", "signer-error", "signer-refused", "signer-protocol"):
+        return 503
+    return 400
+
+
+def _ratify_router(service: ShareRatifier):
+    """Queue an accepted share; never decide it here. A human approves.
+
+    The signer is deliberately absent from this route. The listener has no way
+    to turn a request into a ratification, which is the same structural
+    separation the guard has from the Master key.
+    """
+
+    def router(method: str, path: str, body: dict[str, Any], identity: dict[str, Any]):
+        if method == "POST" and path == "/v1/share/request":
+            request = body.get("request")
+            if not isinstance(request, dict):
+                return 400, {"ok": False, "reason": "malformed", "detail": "request object required"}
+            caller = str(identity.get("verified_key_id") or "")
+            if not caller or request.get("node_id") != caller:
+                return 403, {
+                    "ok": False,
+                    "reason": "key-mismatch",
+                    "detail": "the signed request must name the node whose key signed it",
+                }
+            try:
+                queued = service.accept_share_request(request)
+            except ShareRatifyError as exc:
+                return _status_for(exc), {"ok": False, "reason": exc.reason, "detail": exc.detail}
+            return 202, {**queued, "queue": "human-approval-required"}
+        if method == "GET" and path == "/health":
+            return 200, {
+                "ok": True,
+                "pending": len(service.pending),
+                "decided": len(service.ratifications),
+                "human_approval": True,
+            }
+        return 404, {"ok": False, "reason": "not-found"}
+
+    return router
+
+
+def _serve(service: ShareRatifier, *, bind: str, port: int, keyring: dict[str, Any]) -> None:
+    http = _load_http()
+    server = http.serve(_ratify_router(service), bind=bind, port=port, public_keys=keyring)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
+    thread.start()
+    stopping = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stopping.set())
+    signal.signal(signal.SIGINT, lambda *_: stopping.set())
+    print(f"share-ratify: 4203 on {bind}:{port}, {len(service.pending)} pending (human approval required)", flush=True)
+    try:
+        while not stopping.wait(1.0):
+            pass
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def _read_request(path: str) -> Any:
     if path == "-":
         return json.load(sys.stdin)
@@ -309,12 +493,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reason", default="")
     parser.add_argument("--registry", default=str(DEFAULT_REGISTRY))
     parser.add_argument("--signer-socket", default=str(_default_signer_socket()))
+    parser.add_argument("--state", type=Path, default=None, help="durable queue (0600)")
+    parser.add_argument("--serve", action="store_true", help="listen on 4203 and queue requests")
+    parser.add_argument("--bind", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=4203)
+    parser.add_argument("--trusted-key-dir", type=Path, help="<node_id>.pub.b64 files accepted on 4203")
+    parser.add_argument("--list", action="store_true", help="print queued and decided shares")
+    parser.add_argument("--approve", metavar="SHARE_ID", help="human approval; signs a ratification")
+    parser.add_argument("--refuse", metavar="SHARE_ID", help="human refusal; signs a refusal")
     args = parser.parse_args(argv)
 
+    state = args.state or _default_state_path()
     try:
-        request = _read_request(args.request)
+        if args.list:
+            ratifier = ShareRatifier(args.registry, state_path=state)
+            print(
+                json.dumps({"pending": ratifier.pending, "decided": ratifier.ratifications}, sort_keys=True, indent=2)
+            )
+            return 0
+        if args.serve:
+            if args.trusted_key_dir is None:
+                raise ShareRatifyError("no-verifier", "--trusted-key-dir is required with --serve")
+            authz = _load_authz()
+            keyring = _load_keyring(args.trusted_key_dir, authz)
+            ratifier = ShareRatifier(args.registry, authz=authz, state_path=state)
+            _serve(ratifier, bind=args.bind, port=args.port, keyring=keyring)
+            return 0
         client = SignerClient(args.signer_socket)
-        ratifier = ShareRatifier(args.registry, signer=client.sign_ratification)
+        ratifier = ShareRatifier(args.registry, signer=client.sign_ratification, state_path=state)
+        if args.approve or args.refuse:
+            share_id = args.approve or args.refuse
+            decision = "approve" if args.approve else "refuse"
+            result = ratifier.ratify(share_id, decision, args.reason)
+            print(json.dumps(result, sort_keys=True, indent=2))
+            return 0
+        request = _read_request(args.request)
         accepted = ratifier.accept_share_request(request)
         result = ratifier.ratify(accepted["share_id"], args.decision, args.reason)
     except (OSError, ValueError, ShareRatifyError) as exc:

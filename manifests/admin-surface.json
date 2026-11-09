@@ -1,9 +1,8 @@
 {
   "schema_version": "1.0",
   "contract": "admin-surface",
-  "description": "The elected Master's administrative surface: what an admin may reach, and — the part that matters — what it may not. Read by master-node/tests/test_admin_surface.py, which fails the build if anything here grows a signing capability.",
+  "description": "The elected Master's administrative surface: what an admin may reach, and \u2014 the part that matters \u2014 what it may not. Read by master-node/tests/test_admin_surface.py, which fails the build if anything here grows a signing capability.",
   "authored": "2026-10-05",
-
   "capabilities": {
     "granted": [
       "telemetry",
@@ -13,19 +12,19 @@
       "guard-inspect",
       "registry-draft"
     ],
-    "explicitly_not_granted": ["sign"],
-    "why": "The admin surface is multi-user and LLM-driven: it reads configuration as input and a prompt injection there is a normal Tuesday. The operational key grants everything the peer roles deliberately withhold, so a signer reachable from here inverts the fabric's central thesis. Isolation here is structural — a separate process, a separate filesystem scope and a unix socket — and this file records the intent that a test then checks, rather than trusting a prose promise or a deny rule."
+    "explicitly_not_granted": [
+      "sign"
+    ],
+    "why": "The admin surface is multi-user and LLM-driven: it reads configuration as input and a prompt injection there is a normal Tuesday. The operational key grants everything the peer roles deliberately withhold, so a signer reachable from here inverts the fabric's central thesis. Isolation here is structural \u2014 a separate process, a separate filesystem scope and a unix socket \u2014 and this file records the intent that a test then checks, rather than trusting a prose promise or a deny rule."
   },
-
   "signing_boundary": {
     "signer_service": "master-node/services/sparknet-signer.py",
     "signer_unit": "sparknet-master-signer.service",
     "transport": "unix socket, mode 0600, inside $SPARKNET_STATE_DIR/signer/",
     "reached_from_here": false,
-    "how_signatures_actually_happen": "An admin agent composes a *request* — a typed registry entry or a guard approval naming one peer, one path, one action — and hands it to an operator or to the signer's own unit. The signer re-derives the canonical bytes itself, binds them to the trust root it was started with, refuses anything else, and appends the outcome to the ledger. The admin surface never holds a key, so the worst it can do is ask; what happens to the ask is decided somewhere it cannot see.",
-    "why_not_just_block_the_capability": "A deny rule governs a process that may later ignore it. The capability list here is a second, independent statement of the same boundary — the signer is the thing that enforces it, and this file is the thing that keeps the two in agreement."
+    "how_signatures_actually_happen": "An admin agent composes a *request* \u2014 a typed registry entry or a guard approval naming one peer, one path, one action \u2014 and hands it to an operator or to the signer's own unit. The signer re-derives the canonical bytes itself, binds them to the trust root it was started with, refuses anything else, and appends the outcome to the ledger. The admin surface never holds a key, so the worst it can do is ask; what happens to the ask is decided somewhere it cannot see.",
+    "why_not_just_block_the_capability": "A deny rule governs a process that may later ignore it. The capability list here is a second, independent statement of the same boundary \u2014 the signer is the thing that enforces it, and this file is the thing that keeps the two in agreement."
   },
-
   "agents": {
     "directory": "master-node/.opencode/agents/",
     "role_scoped": true,
@@ -48,19 +47,24 @@
       }
     ]
   },
-
   "page": {
     "reachable_at": "http://10.100.0.1:8088/",
     "overlay_only": true,
     "binds_to": "10.100.0.1",
     "never_binds_to": "0.0.0.0",
-    "why_overlay_only": "The admin page is the surface most worth attacking and the one with the most to lose, so it is reachable only from inside the overlay. The Master is the one role that must never inherit the peer's egress restriction — which pins traffic to 10.100.0.1 — because adopting it here would blackhole the fabric. Overlay-only binding is the opposite move and is not a contradiction: this is about who may *reach the page*, not about what the page may reach.",
+    "why_overlay_only": "The admin page is the surface most worth attacking and the one with the most to lose, so it is reachable only from inside the overlay. The Master is the one role that must never inherit the peer's egress restriction \u2014 which pins traffic to 10.100.0.1 \u2014 because adopting it here would blackhole the fabric. Overlay-only binding is the opposite move and is not a contradiction: this is about who may *reach the page*, not about what the page may reach.",
     "components": [
+      {
+        "name": "nginx",
+        "role": "same-origin proxy: overlay-only 8088, Sparknet launcher injection and /sparknet-console/ routing",
+        "config": "webui/nginx.conf.template",
+        "bind": "10.100.0.1:8088 (host netns)"
+      },
       {
         "name": "open-webui",
         "role": "the multi-user chat surface, where the injection risk actually lives",
         "config": "master-node/configs/admin-surface/docker-compose.admin.yml",
-        "bind": "10.100.0.1:8088:8080"
+        "bind": "127.0.0.1:8080:8080 (Open WebUI behind nginx)"
       },
       {
         "name": "opencode-terminal",
@@ -74,6 +78,5 @@
       "why": "Open WebUI's own vector store would become a second, grant-less knowledge base. The vault is the only knowledge base; a parallel one cannot be revoked with a signed entry, which makes it the quieter way to lose control of what the fabric knows."
     }
   },
-
-  "not_built_yet": "This is a declaration, not a deployment on the development host. Open WebUI is not installed here, no overlay interface exists, and nothing binds 8088 here. `contracts/ports.json` records the port as `provisioned` with `runtime: not-verifiable-here`, and Step 18's DoD (3) reachability is `DoD: confirm: user`. On the live Master (agx32) the surface is deployed at 10.100.0.1:8088 (relocated from 8080, fabric Step 55). The isolation assertions in test_admin_surface.py are read off this file and are therefore only as strong as the file — they prove the declared topology is coherent, not that a real deployment held."
+  "not_built_yet": "This is a declaration, not a deployment on the development host. Open WebUI is not installed here, no overlay interface exists, and nothing binds 8088 here. `contracts/ports.json` records the port as `provisioned` with `runtime: not-verifiable-here`, and Step 18's DoD (3) reachability is `DoD: confirm: user`. On the live Master (agx32) the surface is deployed at 10.100.0.1:8088 (relocated from 8080, fabric Step 55). The isolation assertions in test_admin_surface.py are read off this file and are therefore only as strong as the file \u2014 they prove the declared topology is coherent, not that a real deployment held."
 }

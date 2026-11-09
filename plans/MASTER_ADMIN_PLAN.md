@@ -2,8 +2,8 @@
 title: MASTER_ADMIN_PLAN — the Master as infrastructure administrator
 type: plan
 role: master
-status: spec
-updated: 2026-10-06
+status: built
+updated: 2026-11-03
 ---
 
 # MASTER_ADMIN_PLAN — the Master as infrastructure administrator
@@ -13,19 +13,19 @@ infrastructure administration in addition to its signing authority. This plan
 scopes what that means and — by the charter's rule — what it does **not**
 mean yet.
 
-Everything here is **SPEC ONLY**. No code, no daemon, no populate. The four
-services below exist in `contracts/ports.json` as `spec-only` ports
-(`4220`–`4223`); until a port flips to `provisioned` or `implemented`, saying
-"the Master runs git" is the same overclaim as saying the signer is deployed.
+All four are **built and live** (2026-10-31): `4220` is a read-only bare git
+mirror, `4221` is a signed read-only file share, `4222` is signed status/dry-run
+with no write path, and `4223` serves `sparknet-fabric`/`sparknet-shared`.
+None can reach the signer.
 
 ## The administrator contract
 
 | Subsystem | Port | What administration means |
 |---|---|---|
-| Git | `4220 git-repo` | hosts the fabric repository; manages the authorized-key allowlist; creates/clones/mirrors repositories on request |
-| File sharing | `4221 file-share` | hosts shared volumes for the fabric; peers mount or fetch them over the overlay |
-| NAT | `4222 nat-gateway` | keeps overlay NAT state coherent for peers behind NAT; complements PersistentKeepalive on `51820` |
-| Vector embeddings DB | `4223 vector-embed` | hosts the shared semantic store; roles and wiki skills query it over the overlay |
+| Git | `4220 git-repo` | **live** — read-only bare mirror over git-daemon; no receive-pack |
+| File sharing | `4221 file-share` | **live** — signed read-only list/fetch under `/srv/sparknet/share` |
+| NAT | `4222 nat-gateway` | **live** — signed status and dry-run only; `changes` is always empty |
+| Vector embeddings DB | `4223 vector-embed` | **live** — signed overlay queries against `sparknet-fabric` and explicit `sparknet-shared`; opt-in `.venv-vector` |
 
 These are **infrastructure services**, not authority-plane operations. They
 carry no signed authorization message, which is why they are `overlay_only`,
@@ -49,8 +49,7 @@ in the isolated signer process, and none of these services may reach it.
 
 ## Where this is tracked
 
-- Ports: `contracts/ports.json` (`4220`–`4223`, `spec-only`, `bound_by:
-  master`)
+- Ports: `contracts/ports.json` (all four implemented/live; `bound_by: master`)
 - Role spec: `docs/master-control-plane.md` (Components + Responsibilities
   sections)
 - Gate: `tests/test_contracts.py` requires every non-implemented port to say

@@ -1,0 +1,42 @@
+# The Master's uplift intake (8091) — consented inventory, snapshots, traces,
+# raw-KV manifests. Staged, never enabled by `make units`: a peer-facing socket
+# on the authority-plane node is an operator decision.
+#
+# It binds the Master's overlay address only and verifies, in order: the source
+# is a registered non-revoked peer, the request carries a valid node-key
+# signature, the entry holds `model-uplift`, the timestamp is fresh and the
+# nonce is unused. It holds no key and cannot reach the signer.
+#
+# Stored data is training/backup material. It is never served by 4223 and never
+# installed into a vault. See contracts/vector-store.md and
+# contracts/uplift-schema.json.
+
+[Unit]
+Description=Sparknet Master uplift intake (8091; no key, no signer)
+After=network-online.target sparknet-master-wireguard-anchor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.env
+Environment=SPARKNET_UPLIFT_BIND=10.100.0.1
+Environment=SPARKNET_UPLIFT_PORT=8091
+Environment=SPARKNET_UPLIFT_STATE=/srv/sparknet/uplift
+Environment=SPARKNET_UPLIFT_REGISTRY=%h/manifests/node-authorizations.json
+Environment=SPARKNET_UPLIFT_TRUSTED_KEY=
+ExecStart=/usr/bin/env python3 %h/services/sparknet-uplift-intake.py --serve \
+    --bind ${SPARKNET_UPLIFT_BIND} \
+    --port ${SPARKNET_UPLIFT_PORT} \
+    --state ${SPARKNET_UPLIFT_STATE} \
+    --registry ${SPARKNET_UPLIFT_REGISTRY} \
+    --trusted-key ${SPARKNET_UPLIFT_TRUSTED_KEY}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadWritePaths=/srv/sparknet/uplift
+
+[Install]
+WantedBy=multi-user.target
