@@ -8,7 +8,9 @@
     "vectors",
     "learning",
     "memory",
-    "projects"
+    "projects",
+    "understand",
+    "issues"
   ],
   "bind": "127.0.0.1",
   "port": 8098,
@@ -40,7 +42,9 @@
     "share_regime": "manifests/share-regime.json",
     "telemetry": "/mnt/log/sparknet-telemetry.jsonl",
     "admin_events": ".state/admin-events/events.jsonl",
-    "rfi_dir": ".state/rfi-requests"
+    "rfi_dir": ".state/rfi-requests",
+    "issues": "/mnt/log/sparknet-issues.jsonl",
+    "understand": ".ua/knowledge-graph.json"
   },
   "distill": {
     "config": "configs/distill.json",

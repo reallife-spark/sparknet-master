@@ -151,6 +151,11 @@ Run `make wiki-preflight`, then `/wiki-status`, `/wiki-ingest`, `/wiki-query`,
 `/wiki-lint`, `/wiki-capture`, `/wiki-synthesize`, `/wiki-digest`,
 `/daily-update`.
 
+## Agent skills
+Issues: `.scratch/issues/` (`sparknet-issue/1`); see `docs/agents/issue-tracker.md`.
+Triage: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
+Domain docs: `GLOSSARY.md`, `docs/adr/`; see `docs/agents/domain.md`.
+
 ## Safety and scope
 
 - **Scope discipline.** Master knowledge stays here; peer material in

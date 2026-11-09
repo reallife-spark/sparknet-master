@@ -6,4 +6,7 @@ __pycache__/
 .obsidian/
 
 _staging/
+.scratch/
+.ua/
+.understand-anything/
 evidence-repo/

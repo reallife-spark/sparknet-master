@@ -131,7 +131,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `arzthaftung-aufklaerungspflicht` | Apache-2.0 | `github:AI-Skills-German-Law/medizinrecht/skills/arzthaftung-aufklaerungspflicht` |
 | `ascii-art` | MIT | `github:hermes-agent/skills/creative/ascii-art` |
 | `ascii-video` | MIT | `github:hermes-agent/skills/creative/ascii-video` |
-| `ask-matt` | MIT | `github:skills/skills/engineering/ask-matt` |
 | `assessing-vector-and-embedding-weaknesses` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/assessing-vector-and-embedding-weaknesses` |
 | `asset-deal-betriebsuebergang` | Apache-2.0 | `github:AI-Skills-German-Law/m-a-transaktionsrecht/skills/asset-deal-betriebsuebergang` |
 | `asylantrag-vorbereitung` | Apache-2.0 | `github:AI-Skills-German-Law/migrationsrecht/skills/asylantrag-vorbereitung` |
@@ -256,13 +255,11 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `chaos-engineer` | MIT | `farm:opencode/chaos-engineer` |
 | `chart-visualization` | MIT | `farm:viz/chart-visualization` |
 | `checkpoint-promotion` | MIT | `github:agents/plugins/llm-finetuning/skills/checkpoint-promotion` |
-| `chief-of-staff` | MIT | `github:skills/skills/in-progress/chief-of-staff` |
 | `chroma` | MIT | `github:hermes-agent/optional-skills/mlops/chroma` |
 | `ci-fails-buildkite` | Apache-2.0 | `github:vllm/.claude/skills/ci-fails-buildkite` |
 | `ci-triage` | MIT | `github:loop-engineering/starters/ci-sweeper/.grok/skills/ci-triage` |
 | `claude-api` | Apache-2.0 | `farm:agents/claude-api` |
 | `claude-code` | MIT | `github:hermes-agent/skills/autonomous-ai-agents/claude-code` |
-| `claude-handoff` | MIT | `github:skills/skills/in-progress/claude-handoff` |
 | `claude-history-ingest` | MIT | `github:obsidian-wiki/.skills/claude-history-ingest` |
 | `cli` | MIT | `github:hermes-agent/optional-skills/devops/cli` |
 | `cli-developer` | MIT | `farm:opencode/cli-developer` |
@@ -272,7 +269,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `cloud-auftragsverarbeitung` | Apache-2.0 | `github:AI-Skills-German-Law/it-recht/skills/cloud-auftragsverarbeitung` |
 | `cmr-grenzueberschreitender-transport` | Apache-2.0 | `github:AI-Skills-German-Law/transportrecht/skills/cmr-grenzueberschreitender-transport` |
 | `code-documenter` | MIT | `farm:opencode/code-documenter` |
-| `code-review` | MIT | `github:skills/skills/engineering/code-review` |
 | `code-review-breaking-changes` | Apache-2.0 | `github:codex/.codex/skills/code-review-breaking-changes` |
 | `code-review-change-size` | Apache-2.0 | `github:codex/.codex/skills/code-review-change-size` |
 | `code-review-context` | Apache-2.0 | `github:codex/.codex/skills/code-review-context` |
@@ -280,7 +276,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `code-review-testing` | Apache-2.0 | `github:codex/.codex/skills/code-review-testing` |
 | `code-reviewer` | MIT | `farm:opencode/code-reviewer` |
 | `code-understanding` | MIT | `github:raptor/.claude/skills/code-understanding` |
-| `codebase-design` | MIT | `github:skills/skills/engineering/codebase-design` |
 | `codebase-inspection` | MIT | `github:hermes-agent/skills/github/codebase-inspection` |
 | `codex` | MIT | `github:hermes-agent/skills/autonomous-ai-agents/codex` |
 | `codex-history-ingest` | MIT | `github:obsidian-wiki/.skills/codex-history-ingest` |
@@ -480,7 +475,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `detecting-typosquatting-packages-in-npm-pypi` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/detecting-typosquatting-packages-in-npm-pypi` |
 | `detecting-wmi-persistence` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/detecting-wmi-persistence` |
 | `devops-engineer` | MIT | `farm:opencode/devops-engineer` |
-| `diagnosing-bugs` | MIT | `github:skills/skills/engineering/diagnosing-bugs` |
 | `diagnosing-superpowers` | MIT | `github:superpowers/skills/diagnosing-superpowers` |
 | `dienstliche-beurteilung` | Apache-2.0 | `github:AI-Skills-German-Law/beamten-disziplinarrecht/skills/dienstliche-beurteilung` |
 | `discovery` | Apache-2.0 | `github:knowledge-catalog/samples/discovery` |
@@ -492,7 +486,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `docker-management` | MIT | `github:hermes-agent/optional-skills/devops/docker-management` |
 | `dogfood` | MIT | `github:hermes-agent/skills/dogfood` |
 | `domain-intel` | MIT | `github:hermes-agent/optional-skills/research/domain-intel` |
-| `domain-modeling` | MIT | `github:skills/skills/engineering/domain-modeling` |
 | `domainrecht` | Apache-2.0 | `github:AI-Skills-German-Law/it-recht/skills/domainrecht` |
 | `dopingverfahren-verteidigung` | Apache-2.0 | `github:AI-Skills-German-Law/sportrecht/skills/dopingverfahren-verteidigung` |
 | `dora-drittparteienrisiko` | Apache-2.0 | `github:AI-Skills-German-Law/dora/skills/dora-drittparteienrisiko` |
@@ -637,7 +630,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `ghi-list` | MIT | `github:gastown/.claude/skills/ghi-list` |
 | `gif-search` | MIT | `github:hermes-agent/skills/media/gif-search` |
 | `git-advanced-workflows` | MIT | `github:agents/plugins/developer-essentials/skills/git-advanced-workflows` |
-| `git-guardrails-claude-code` | MIT | `github:skills/skills/misc/git-guardrails-claude-code` |
 | `github-actions-templates` | MIT | `github:agents/plugins/cicd-automation/skills/github-actions-templates` |
 | `github-archive` | MIT | `github:raptor/.claude/skills/oss-forensics/github-archive` |
 | `github-auth` | MIT | `github:hermes-agent/skills/github/github-auth` |
@@ -663,9 +655,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `gpt-vis` | MIT | `farm:viz/gpt-vis` |
 | `grafana-dashboards` | MIT | `github:agents/plugins/observability-monitoring/skills/grafana-dashboards` |
 | `graphql-architect` | MIT | `farm:opencode/graphql-architect` |
-| `grill-me` | MIT | `github:skills/skills/productivity/grill-me` |
-| `grill-with-docs` | MIT | `github:skills/skills/engineering/grill-with-docs` |
-| `grilling` | MIT | `github:skills/skills/productivity/grilling` |
 | `grounded-vault` | MIT | `github:agents/plugins/documentation-standards/skills/grounded-vault` |
 | `grpo-rl-training` | MIT | `github:hermes-agent/skills/mlops/training/grpo-rl-training` |
 | `grpo-rlvr-training` | MIT | `github:agents/plugins/llm-finetuning/skills/grpo-rlvr-training` |
@@ -679,7 +668,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `hads` | MIT | `github:agents/plugins/documentation-standards/skills/hads` |
 | `handelsregister-eintragungspflicht` | Apache-2.0 | `github:AI-Skills-German-Law/handelsrecht/skills/handelsregister-eintragungspflicht` |
 | `handelsvertretervertrag` | Apache-2.0 | `github:AI-Skills-German-Law/handelsrecht/skills/handelsvertretervertrag` |
-| `handoff` | MIT | `github:skills/skills/productivity/handoff` |
 | `handwerksrolle-hwo` | Apache-2.0 | `github:AI-Skills-German-Law/gewerberecht/skills/handwerksrolle-hwo` |
 | `hardening-docker-containers-for-production` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/hardening-docker-containers-for-production` |
 | `hardening-docker-daemon-configuration` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/hardening-docker-daemon-configuration` |
@@ -742,8 +730,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `imagegen` | Apache-2.0 | `github:codex/codex-rs/skills/src/assets/samples/imagegen` |
 | `imessage` | MIT | `github:hermes-agent/skills/apple/imessage` |
 | `immobiliarvollstreckung-zvg` | Apache-2.0 | `github:AI-Skills-German-Law/zwangsvollstreckung/skills/immobiliarvollstreckung-zvg` |
-| `implement` | MIT | `github:skills/skills/engineering/implement` |
-| `implement-spec` | MIT | `github:skills/skills/engineering/implement-spec` |
 | `implementing-aes-encryption-for-data-at-rest` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/implementing-aes-encryption-for-data-at-rest` |
 | `implementing-alert-fatigue-reduction` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/implementing-alert-fatigue-reduction` |
 | `implementing-anti-phishing-training-program` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/implementing-anti-phishing-training-program` |
@@ -912,7 +898,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `implementing-zero-trust-network-access-with-zscaler` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/implementing-zero-trust-network-access-with-zscaler` |
 | `implementing-zero-trust-with-beyondcorp` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/implementing-zero-trust-with-beyondcorp` |
 | `implementing-zero-trust-with-hashicorp-boundary` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/implementing-zero-trust-with-hashicorp-boundary` |
-| `improve-codebase-architecture` | MIT | `github:skills/skills/engineering/improve-codebase-architecture` |
 | `incident-runbook-templates` | MIT | `github:agents/plugins/incident-response/skills/incident-runbook-templates` |
 | `infographic-creator` | MIT | `farm:viz/infographic-creator` |
 | `install-loop` | MIT | `github:loop-engineering/skills/install-loop` |
@@ -992,7 +977,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `lm-evaluation-harness` | MIT | `github:hermes-agent/skills/mlops/evaluation/lm-evaluation-harness` |
 | `loop-budget` | MIT | `github:loop-engineering/skills/loop-budget` |
 | `loop-constraints` | MIT | `github:loop-engineering/skills/loop-constraints` |
-| `loop-me` | MIT | `github:skills/skills/in-progress/loop-me` |
 | `loop-triage` | MIT | `github:loop-engineering/skills/loop-triage` |
 | `loop-verifier` | MIT | `github:loop-engineering/skills/loop-verifier` |
 | `lora-qlora-recipes` | MIT | `github:agents/plugins/llm-finetuning/skills/lora-qlora-recipes` |
@@ -1025,7 +1009,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `mieterhoehung-558-bgb` | Apache-2.0 | `github:AI-Skills-German-Law/mietrecht/skills/mieterhoehung-558-bgb` |
 | `mietmangel-minderung` | Apache-2.0 | `github:AI-Skills-German-Law/mietrecht/skills/mietmangel-minderung` |
 | `mietpreisbremse` | Apache-2.0 | `github:AI-Skills-German-Law/mietrecht/skills/mietpreisbremse` |
-| `migrate-to-shoehorn` | MIT | `github:skills/skills/misc/migrate-to-shoehorn` |
 | `migrating-to-post-quantum-cryptography` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/migrating-to-post-quantum-cryptography` |
 | `minecraft-modpack-server` | MIT | `github:hermes-agent/skills/gaming/minecraft-modpack-server` |
 | `minimal-fix` | MIT | `github:loop-engineering/skills/minimal-fix` |
@@ -1313,7 +1296,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `pptx-reference-deck-analysis` | MIT | `github:agents/plugins/pptx-deck-creation/skills/pptx-reference-deck-analysis` |
 | `pptx-slide-specification` | MIT | `github:agents/plugins/pptx-deck-creation/skills/pptx-slide-specification` |
 | `pptx-visual-assets` | MIT | `github:agents/plugins/pptx-deck-creation/skills/pptx-visual-assets` |
-| `pr` | MIT | `github:skills/skills/engineering/pr` |
 | `pr-list` | MIT | `github:gastown/.claude/skills/pr-list` |
 | `pr-review-triage` | MIT | `github:loop-engineering/starters/pr-babysitter/.grok/skills/pr-review-triage` |
 | `praeventions-abhilfemassnahmen` | Apache-2.0 | `github:AI-Skills-German-Law/lieferkettengesetz/skills/praeventions-abhilfemassnahmen` |
@@ -1332,7 +1314,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `prospektpflicht-pruefung` | Apache-2.0 | `github:AI-Skills-German-Law/kapitalmarktrecht/skills/prospektpflicht-pruefung` |
 | `protect-mcp-setup` | MIT | `github:agents/plugins/protect-mcp/skills/protect-mcp-setup` |
 | `protocol-reverse-engineering` | MIT | `github:agents/plugins/reverse-engineering/skills/protocol-reverse-engineering` |
-| `prototype` | MIT | `github:skills/skills/engineering/prototype` |
 | `providerhaftung` | Apache-2.0 | `github:AI-Skills-German-Law/it-recht/skills/providerhaftung` |
 | `prozesskostenhilfe` | Apache-2.0 | `github:AI-Skills-German-Law/prozessrecht/skills/prozesskostenhilfe` |
 | `python-anti-patterns` | MIT | `github:agents/plugins/python-development/skills/python-anti-patterns` |
@@ -1380,12 +1361,10 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `remote-tests` | Apache-2.0 | `github:codex/.codex/skills/remote-tests` |
 | `repressalienschutz` | Apache-2.0 | `github:AI-Skills-German-Law/hinweisgeberschutz/skills/repressalienschutz` |
 | `requesting-code-review` | MIT | `github:superpowers/skills/requesting-code-review` |
-| `research` | MIT | `github:skills/skills/engineering/research` |
 | `research-paper-writing` | MIT | `github:hermes-agent/skills/research/research-paper-writing` |
 | `responsive-design` | MIT | `github:agents/plugins/ui-design/skills/responsive-design` |
 | `rest-core-grpc-proxy` | Apache-2.0 | `github:infra-controller/rest-api/skills/rest-core-grpc-proxy` |
 | `rest-flow-grpc-proxy` | Apache-2.0 | `github:infra-controller/rest-api/skills/rest-flow-grpc-proxy` |
-| `retro` | MIT | `github:skills/skills/engineering/retro` |
 | `reverse-engineering-android-malware-with-jadx` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/reverse-engineering-android-malware-with-jadx` |
 | `reverse-engineering-dotnet-malware-with-dnspy` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/reverse-engineering-dotnet-malware-with-dnspy` |
 | `reverse-engineering-ios-app-with-frida` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/reverse-engineering-ios-app-with-frida` |
@@ -1411,7 +1390,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `salesforce-developer` | MIT | `farm:opencode/salesforce-developer` |
 | `sanktionslisten-screening` | Apache-2.0 | `github:AI-Skills-German-Law/aussenwirtschaft-zoll-sanktionen/skills/sanktionslisten-screening` |
 | `sast-configuration` | MIT | `github:agents/plugins/security-scanning/skills/sast-configuration` |
-| `scaffold-exercises` | MIT | `github:skills/skills/misc/scaffold-exercises` |
 | `scan` | MIT | `github:agents/plugins/ship-mate/skills/scan` |
 | `scanning-container-images-with-grype` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/scanning-container-images-with-grype` |
 | `scanning-containers-with-trivy-in-cicd` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/scanning-containers-with-trivy-in-cicd` |
@@ -1449,9 +1427,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `selbststaendiges-beweisverfahren` | Apache-2.0 | `github:AI-Skills-German-Law/prozessrecht/skills/selbststaendiges-beweisverfahren` |
 | `service-mesh-observability` | MIT | `github:agents/plugins/cloud-infrastructure/skills/service-mesh-observability` |
 | `session-guard` | MIT | `github:agents/plugins/skill-forge-essentials/skills/session-guard` |
-| `setup-matt-pocock-skills` | MIT | `github:skills/skills/engineering/setup-matt-pocock-skills` |
-| `setup-pre-commit` | MIT | `github:skills/skills/misc/setup-pre-commit` |
-| `setup-ts-deep-modules` | MIT | `github:skills/skills/in-progress/setup-ts-deep-modules` |
 | `sgb-ii-leistungsanspruch` | Apache-2.0 | `github:AI-Skills-German-Law/sozialrecht/skills/sgb-ii-leistungsanspruch` |
 | `sgb-vi-rentenanspruch` | Apache-2.0 | `github:AI-Skills-German-Law/sozialrecht/skills/sgb-vi-rentenanspruch` |
 | `share-deal-spa` | Apache-2.0 | `github:AI-Skills-German-Law/m-a-transaktionsrecht/skills/share-deal-spa` |
@@ -1506,8 +1481,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `systematic-debugging` | MIT | `github:superpowers/skills/systematic-debugging` |
 | `tailwind-design-system` | MIT | `github:agents/plugins/frontend-mobile-development/skills/tailwind-design-system` |
 | `task-coordination-strategies` | MIT | `github:agents/plugins/agent-teams/skills/task-coordination-strategies` |
-| `tdd` | MIT | `github:skills/skills/engineering/tdd` |
-| `teach` | MIT | `github:skills/skills/productivity/teach` |
 | `team-communication-protocols` | MIT | `github:agents/plugins/agent-teams/skills/team-communication-protocols` |
 | `team-composition-analysis` | MIT | `github:agents/plugins/startup-business-analyst/skills/team-composition-analysis` |
 | `team-composition-patterns` | MIT | `github:agents/plugins/agent-teams/skills/team-composition-patterns` |
@@ -1547,14 +1520,10 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `the-fool` | MIT | `farm:opencode/the-fool` |
 | `theme-factory` | Apache-2.0 | `farm:agents/theme-factory` |
 | `threat-mitigation-mapping` | MIT | `github:agents/plugins/security-scanning/skills/threat-mitigation-mapping` |
-| `to-questionnaire` | MIT | `github:skills/skills/productivity/to-questionnaire` |
-| `to-spec` | MIT | `github:skills/skills/engineering/to-spec` |
-| `to-tickets` | MIT | `github:skills/skills/engineering/to-tickets` |
 | `torchtitan` | MIT | `github:hermes-agent/optional-skills/mlops/torchtitan` |
 | `trace-to-training-data` | MIT | `github:agents/plugins/llm-finetuning/skills/trace-to-training-data` |
 | `track-management` | MIT | `github:agents/plugins/conductor/skills/track-management` |
 | `tracking-threat-actor-infrastructure` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/tracking-threat-actor-infrastructure` |
-| `triage` | MIT | `github:skills/skills/engineering/triage` |
 | `triaging-security-alerts-in-splunk` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/triaging-security-alerts-in-splunk` |
 | `triaging-security-incident` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/triaging-security-incident` |
 | `triaging-security-incident-with-ir-playbook` | Apache-2.0 | `github:Anthropic-Cybersecurity-Skills/skills/triaging-security-incident-with-ir-playbook` |
@@ -1619,8 +1588,6 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `vscode-extension-dev` | MIT | `github:opencode_sidebar/.agents/skills/vscode-extension-dev` |
 | `vue-expert` | MIT | `farm:opencode/vue-expert` |
 | `vue-expert-js` | MIT | `farm:opencode/vue-expert-js` |
-| `wait-what` | MIT | `github:skills/skills/productivity/wait-what` |
-| `wayfinder` | MIT | `github:skills/skills/engineering/wayfinder` |
 | `wcag-audit-patterns` | MIT | `github:agents/plugins/accessibility-compliance/skills/wcag-audit-patterns` |
 | `web-artifacts-builder` | Apache-2.0 | `farm:agents/web-artifacts-builder` |
 | `web-component-design` | MIT | `github:agents/plugins/ui-design/skills/web-component-design` |
@@ -1640,18 +1607,13 @@ license allowlist; the peer catalog is a curated subset of the same rule.
 | `wiederaufnahme` | Apache-2.0 | `github:AI-Skills-German-Law/strafrecht/skills/wiederaufnahme` |
 | `wiki-agent` | MIT | `farm:wiki/wiki-agent` |
 | `wiki-history-ingest` | MIT | `farm:wiki/wiki-history-ingest` |
-| `wizard` | MIT | `github:skills/skills/engineering/wizard` |
 | `wohnungseigentum-teilungserklaerung` | Apache-2.0 | `github:AI-Skills-German-Law/immobilien-grundbuchrecht/skills/wohnungseigentum-teilungserklaerung` |
 | `wordpress-pro` | MIT | `farm:opencode/wordpress-pro` |
 | `workflow-orchestration-patterns` | MIT | `github:agents/plugins/backend-development/skills/workflow-orchestration-patterns` |
 | `workflow-patterns` | MIT | `github:agents/plugins/conductor/skills/workflow-patterns` |
 | `wphg-marktmissbrauch` | Apache-2.0 | `github:AI-Skills-German-Law/kapitalmarktrecht/skills/wphg-marktmissbrauch` |
 | `wpueg-uebernahmeangebot` | Apache-2.0 | `github:AI-Skills-German-Law/kapitalmarktrecht/skills/wpueg-uebernahmeangebot` |
-| `writing-beats` | MIT | `github:skills/skills/in-progress/writing-beats` |
-| `writing-for-agents` | MIT | `github:skills/skills/productivity/writing-for-agents` |
-| `writing-fragments` | MIT | `github:skills/skills/in-progress/writing-fragments` |
 | `writing-plans` | MIT | `github:superpowers/skills/writing-plans` |
-| `writing-shape` | MIT | `github:skills/skills/in-progress/writing-shape` |
 | `writing-skills` | MIT | `github:superpowers/skills/writing-skills` |
 | `xitter` | MIT | `github:hermes-agent/skills/social-media/xitter` |
 | `youtube-content` | MIT | `github:hermes-agent/skills/media/youtube-content` |

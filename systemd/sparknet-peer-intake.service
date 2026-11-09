@@ -1,4 +1,5 @@
-# The Master's peer-intake listener (8090) — telemetry evidence and RFI requests.
+# The Master's peer-intake listener (8090) — telemetry evidence, RFI requests and
+# signed issue reports.
 #
 # Not enabled by `make units`. It is a peer-facing socket on the authority-plane
 # node, so enabling it is an operator decision, exactly as the signer and reflex
@@ -29,12 +30,16 @@ Environment=SPARKNET_TELEMETRY_PORT=8090
 Environment=SPARKNET_TELEMETRY_REGISTRY=%h/manifests/node-authorizations.json
 Environment=SPARKNET_TELEMETRY_SPOOL=/mnt/log/sparknet-telemetry.jsonl
 Environment=SPARKNET_RFI_REQUEST_DIR=/mnt/log/sparknet-rfi-requests
+Environment=SPARKNET_ISSUE_STORE=/mnt/log/sparknet-issues.jsonl
+Environment=SPARKNET_ISSUE_KEYRING=/etc/sparknet/issue-keys.json
 ExecStart=/usr/bin/env python3 %h/services/sparknet-peer-intake.py --serve \
     --bind ${SPARKNET_TELEMETRY_BIND} \
     --port ${SPARKNET_TELEMETRY_PORT} \
     --registry ${SPARKNET_TELEMETRY_REGISTRY} \
     --spool ${SPARKNET_TELEMETRY_SPOOL} \
-    --request-dir ${SPARKNET_RFI_REQUEST_DIR}
+    --request-dir ${SPARKNET_RFI_REQUEST_DIR} \
+    --issue-store ${SPARKNET_ISSUE_STORE} \
+    --issue-keyring ${SPARKNET_ISSUE_KEYRING}
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes

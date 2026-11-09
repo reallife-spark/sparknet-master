@@ -1,7 +1,7 @@
 ---
 title: sparknet master-node Plan
-updated: 2026-11-06
-current: 26
+updated: 2026-11-09
+current: 28
 ---
 
 # sparknet master-node — Active Plan
@@ -253,6 +253,37 @@ current: 26
     peer vault/DB write; `make test-master`, `make contract-test`,
     `make context-check`, `make bundle-verify ROLE=master`, `make ci`; live legs
     `DoD: confirm: user`.
+
+## Step 28 — Understand-Anything + issue intake (master half)
+
+- [ ] **Step 28** — Add the Master half of the Step 91 integration. Opened ahead
+  of the queued Step 27 by operator direction on 2026-11-09; Step 27 remains
+  queued and is not cancelled.
+  - [x] **28A — Skills and tracker.** Load the nine `/understand*` skills, the
+    Matt Pocock engineering family and `setup-matt-pocock-skills`; run the
+    setup with the local markdown tracker and write `docs/agents/*`,
+    `GLOSSARY.md`, `docs/adr/` and `.scratch/issues/`.
+  - [x] **28B — Issue intake.** Extend `services/sparknet-peer-intake.py` with
+    `POST /api/v1/issues`; verify the signature, overlay fingerprint, expiry,
+    nonce and `issue-report` capability; re-check redaction; upsert by
+    `(node_id, issue_id)`.
+  - [x] **28C — Store and triage.** Append to `/mnt/log/sparknet-issues.jsonl`
+    and keep a local triage state; add `GET /api/issues` and the Issues tab.
+  - [x] **28D — Console.** The shared Understand and Issues tabs render for the
+    Master role with the master config.
+  - **DoD**: `make -C master-node test`, `make contract-test`,
+    `make context-check`, `make role-skills-check` and
+    `make bundle-verify ROLE=master` are green; signed acceptance, capability
+    refusal, replay refusal, digest mismatch and redaction refusal are covered
+    by tests; live peer delivery is `DoD: confirm: user`.
+
+  - **Status 2026-11-09 — Master half implemented.** The Master catalog no
+    longer shadows the 80-skill base suite (1614 role-local), the local tracker
+    and docs are in place, `POST /api/v1/issues` verifies the signature,
+    overlay fingerprint, capability, digest, expiry and replay and appends to
+    the issue store, and the console exposes the issues read-only. `make ci`,
+    `make -C master-node test` and `make bundle-verify ROLE=master` are green.
+    Live peer delivery is `DoD: confirm: user`.
 
 ## Next
 

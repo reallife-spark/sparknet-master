@@ -1,9 +1,9 @@
 {
   "counts": {
-    "base_suite": 33,
+    "base_suite": 80,
     "optional": 1,
-    "skills": 1652,
-    "total_visible": 1685
+    "skills": 1614,
+    "total_visible": 1694
   },
   "generated_by": "scripts/sync-role-skills.py",
   "license_policy": {
@@ -1557,18 +1557,6 @@
       "tier": "standard",
       "variants": []
     },
-    "ask-matt": {
-      "description_truncated": false,
-      "files": 3,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "1371f5ce005de0992a44b137748bfb960a56948aa9871b405fe9d90b24332e3c",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/ask-matt",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "assessing-vector-and-embedding-weaknesses": {
       "description_truncated": false,
       "files": 5,
@@ -3076,18 +3064,6 @@
       "tier": "standard",
       "variants": []
     },
-    "chief-of-staff": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "a187d9e36e65373d2d1f469790858dd57d6eb72b6ea16932df9c40616ac9f720",
-      "skipped": [],
-      "source": "github:skills/skills/in-progress/chief-of-staff",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "chroma": {
       "description_truncated": false,
       "files": 2,
@@ -3152,18 +3128,6 @@
       "skipped": [],
       "source": "github:hermes-agent/skills/autonomous-ai-agents/claude-code",
       "source_repo": "hermes-agent",
-      "tier": "standard",
-      "variants": []
-    },
-    "claude-handoff": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "79357a18425d66d4c24048bedf83dceb79d3bba356f38014950f764a7fab4026",
-      "skipped": [],
-      "source": "github:skills/skills/in-progress/claude-handoff",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -3289,31 +3253,6 @@
         }
       ]
     },
-    "code-review": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "09eb147f793e4647949edd32dbad278f0554dfb56e0d46b699cd4c2c55bf0357",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/code-review",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": [
-        {
-          "file": "references/merged/codex/VARIANT.md",
-          "license": "Apache-2.0",
-          "source": "github:codex/.codex/skills/code-review",
-          "source_repo": "codex"
-        },
-        {
-          "file": "references/merged/spec-kit/VARIANT.md",
-          "license": "MIT",
-          "source": "github:spec-kit/.github/skills/code-review",
-          "source_repo": "spec-kit"
-        }
-      ]
-    },
     "code-review-breaking-changes": {
       "description_truncated": false,
       "files": 1,
@@ -3402,18 +3341,6 @@
       "skipped": [],
       "source": "github:raptor/.claude/skills/code-understanding",
       "source_repo": "raptor",
-      "tier": "standard",
-      "variants": []
-    },
-    "codebase-design": {
-      "description_truncated": false,
-      "files": 4,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "2c20617f87ec8af6a434859f381b2f061a69b530444e74eb39e78bb016a6d1e2",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/codebase-design",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -5833,18 +5760,6 @@
         }
       ]
     },
-    "diagnosing-bugs": {
-      "description_truncated": false,
-      "files": 3,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "849198df88cdb65fd0d97236604c1fca7ff2f22d2f705f9724a800d0266b118d",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/diagnosing-bugs",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "diagnosing-superpowers": {
       "description_truncated": false,
       "files": 20,
@@ -5974,18 +5889,6 @@
       "skipped": [],
       "source": "github:hermes-agent/optional-skills/research/domain-intel",
       "source_repo": "hermes-agent",
-      "tier": "standard",
-      "variants": []
-    },
-    "domain-modeling": {
-      "description_truncated": false,
-      "files": 4,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "7b925d7b1e341a2eeae33ad68a8a8c0ab889a38ddd22a7598e4c240e5a7556a3",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/domain-modeling",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -7772,18 +7675,6 @@
       "tier": "standard",
       "variants": []
     },
-    "git-guardrails-claude-code": {
-      "description_truncated": false,
-      "files": 3,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "69b291d655626a01602b998a1836fcb93c058ede68dfafddfd71e87f17074764",
-      "skipped": [],
-      "source": "github:skills/skills/misc/git-guardrails-claude-code",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "github-actions-templates": {
       "description_truncated": false,
       "files": 1,
@@ -8091,42 +7982,6 @@
         }
       ]
     },
-    "grill-me": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "caaf8b8de1684f96e26b28f3c29189db5c89cce4b73e1c93d86164f66ef88637",
-      "skipped": [],
-      "source": "github:skills/skills/productivity/grill-me",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "grill-with-docs": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "7de372c13488f1ee96cc11cd8907b56b6809cc93eef776eeddd37de6b6cbe3fe",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/grill-with-docs",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "grilling": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "befdff1e27a1dfe2a294d5871169ac1afe16d983911daa4f32627514a48c1e15",
-      "skipped": [],
-      "source": "github:skills/skills/productivity/grilling",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "grounded-vault": {
       "description_truncated": false,
       "files": 2,
@@ -8280,18 +8135,6 @@
       "skipped": [],
       "source": "github:AI-Skills-German-Law/handelsrecht/skills/handelsvertretervertrag",
       "source_repo": "AI-Skills-German-Law",
-      "tier": "standard",
-      "variants": []
-    },
-    "handoff": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "4cbb043950dad2ffd3662ff1a5a0b51ae676004b5cae10e3787e8ee7a4ee69d3",
-      "skipped": [],
-      "source": "github:skills/skills/productivity/handoff",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -9036,30 +8879,6 @@
       "skipped": [],
       "source": "github:AI-Skills-German-Law/zwangsvollstreckung/skills/immobiliarvollstreckung-zvg",
       "source_repo": "AI-Skills-German-Law",
-      "tier": "standard",
-      "variants": []
-    },
-    "implement": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "483bdc4ccf4ac31d86ac7beeaa0d0db80313e71e120bb8c59b3196ae5decd53d",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/implement",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "implement-spec": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "7a22dd2e60b8fcece478ced9d2533582adf3520d695acd3ab715341535c9e56d",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/implement-spec",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -11079,18 +10898,6 @@
       "tier": "standard",
       "variants": []
     },
-    "improve-codebase-architecture": {
-      "description_truncated": false,
-      "files": 3,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "552240a5ab5cec6b67c15dd1ad6e9f6962b1bca6ce870059a8c2713760c20392",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/improve-codebase-architecture",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "incident-runbook-templates": {
       "description_truncated": false,
       "files": 2,
@@ -12081,18 +11888,6 @@
       "tier": "standard",
       "variants": []
     },
-    "loop-me": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "e44d1cc3e760fb86ac42964c2a5f1fcac511715db50fb375f3f7be814de1eaa7",
-      "skipped": [],
-      "source": "github:skills/skills/in-progress/loop-me",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "loop-triage": {
       "description_truncated": false,
       "files": 1,
@@ -12522,18 +12317,6 @@
       "skipped": [],
       "source": "github:AI-Skills-German-Law/mietrecht/skills/mietpreisbremse",
       "source_repo": "AI-Skills-German-Law",
-      "tier": "standard",
-      "variants": []
-    },
-    "migrate-to-shoehorn": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "de4da4c11d924fac79c924b2ee3d2db4a5cb98386eb490a599119463d036ae72",
-      "skipped": [],
-      "source": "github:skills/skills/misc/migrate-to-shoehorn",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -16016,18 +15799,6 @@
       "tier": "standard",
       "variants": []
     },
-    "pr": {
-      "description_truncated": false,
-      "files": 3,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "ab63f1cf78647389edcd386c9427c5dfca27ed2836930c24773ffee834c19bcd",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/pr",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "pr-list": {
       "description_truncated": false,
       "files": 1,
@@ -16248,18 +16019,6 @@
       "skipped": [],
       "source": "github:agents/plugins/reverse-engineering/skills/protocol-reverse-engineering",
       "source_repo": "agents",
-      "tier": "standard",
-      "variants": []
-    },
-    "prototype": {
-      "description_truncated": false,
-      "files": 4,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "714de632d116bb73f65cdb5a882db15b9369a6713b9a47c0fad827848f0bfbe3",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/prototype",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -16855,18 +16614,6 @@
         }
       ]
     },
-    "research": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "985569f15739c713d6784887c3d186d4ef9ac85bec5ad9c068d25bf0739928e4",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/research",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "research-paper-writing": {
       "description_truncated": false,
       "files": 53,
@@ -16912,18 +16659,6 @@
       "skipped": [],
       "source": "github:infra-controller/rest-api/skills/rest-flow-grpc-proxy",
       "source_repo": "infra-controller",
-      "tier": "standard",
-      "variants": []
-    },
-    "retro": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "33fbc28568e3146f20fd908b12998bc0ab30aa4f4c87288199a40793efa94696",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/retro",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -17231,18 +16966,6 @@
       "skipped": [],
       "source": "github:agents/plugins/security-scanning/skills/sast-configuration",
       "source_repo": "agents",
-      "tier": "standard",
-      "variants": []
-    },
-    "scaffold-exercises": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "75f5c9d771606fb9762f16522efc954df11c324f87148d8ff069bce166257de9",
-      "skipped": [],
-      "source": "github:skills/skills/misc/scaffold-exercises",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -17697,42 +17420,6 @@
       "tier": "standard",
       "variants": []
     },
-    "setup-matt-pocock-skills": {
-      "description_truncated": false,
-      "files": 7,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "b01e05bfe8c323171275c6ceec78b12f1bd4c62dfd26c2cfe8be806d3883f1ed",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/setup-matt-pocock-skills",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "setup-pre-commit": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "c9819d7f1e3b198064edc1faa3154224ed67395e9f07f5d3cea4b67cf0a11a98",
-      "skipped": [],
-      "source": "github:skills/skills/misc/setup-pre-commit",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "setup-ts-deep-modules": {
-      "description_truncated": false,
-      "files": 3,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "29acca66ac99d4532e2a6f0370d8125d7cba1e87c9ac66573203c75189d3e6c7",
-      "skipped": [],
-      "source": "github:skills/skills/in-progress/setup-ts-deep-modules",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "sgb-ii-leistungsanspruch": {
       "description_truncated": false,
       "files": 2,
@@ -17890,7 +17577,7 @@
       "variants": []
     },
     "skill-template": {
-      "files": 9,
+      "files": 11,
       "license": "MIT OR Apache-2.0",
       "sellable": true,
       "sha256": "4e06f2632cf026fe7fe7665a5478446c27684fe91a3c4e913693835771629ec8",
@@ -18429,30 +18116,6 @@
       "tier": "standard",
       "variants": []
     },
-    "tdd": {
-      "description_truncated": false,
-      "files": 4,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "5505d25bbaa8fc14a79e4d20163936958992a2995b7f1dd1d6197edc9ed722e0",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/tdd",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "teach": {
-      "description_truncated": false,
-      "files": 6,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "550482c2d674b085c9043b87bfdc14a8f2ec453c736119e7fcbb1e9332bffeba",
-      "skipped": [],
-      "source": "github:skills/skills/productivity/teach",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "team-communication-protocols": {
       "description_truncated": false,
       "files": 2,
@@ -18935,42 +18598,6 @@
       "tier": "standard",
       "variants": []
     },
-    "to-questionnaire": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "b5eb929842ee0e93d867c5e906d183d350f2f2d149eaeaa86967d94d8eda1d3b",
-      "skipped": [],
-      "source": "github:skills/skills/productivity/to-questionnaire",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "to-spec": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "43ad9cf318e5e7d3d1fa360253a37021796dc87a0c2e595ad262661a10f85088",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/to-spec",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "to-tickets": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "56ec23c5b2782785d4e65bff9e315b6d3aeb4ef977c174a219e99489fada1995",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/to-tickets",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "torchtitan": {
       "description_truncated": false,
       "files": 5,
@@ -19016,18 +18643,6 @@
       "skipped": [],
       "source": "github:Anthropic-Cybersecurity-Skills/skills/tracking-threat-actor-infrastructure",
       "source_repo": "Anthropic-Cybersecurity-Skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "triage": {
-      "description_truncated": false,
-      "files": 4,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "917b0baf74be583e74f110857ed45df2766617f75c00baf61fd136d7af515edf",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/triage",
-      "source_repo": "skills",
       "tier": "standard",
       "variants": []
     },
@@ -19813,30 +19428,6 @@
       "tier": "standard",
       "variants": []
     },
-    "wait-what": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "d961bb37defd975c539427edb8f450cdbccdcdd552e213c1ece46676a7970905",
-      "skipped": [],
-      "source": "github:skills/skills/productivity/wait-what",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "wayfinder": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "9be7b478c389605a24517d27752f278933588da97a1b5921b165f455edf4c5b7",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/wayfinder",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "wcag-audit-patterns": {
       "description_truncated": false,
       "files": 2,
@@ -20072,18 +19663,6 @@
         }
       ]
     },
-    "wizard": {
-      "description_truncated": false,
-      "files": 3,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "bdf31d48211ea559878f95a4f344aeabf8d85897488ba564382bab0b000daac1",
-      "skipped": [],
-      "source": "github:skills/skills/engineering/wizard",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "wohnungseigentum-teilungserklaerung": {
       "description_truncated": false,
       "files": 2,
@@ -20156,42 +19735,6 @@
       "tier": "standard",
       "variants": []
     },
-    "writing-beats": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "a96abafa2372eede8267d770138b322d6125da8adaa7ccf0a5e08e4ee13ee71e",
-      "skipped": [],
-      "source": "github:skills/skills/in-progress/writing-beats",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "writing-for-agents": {
-      "description_truncated": false,
-      "files": 3,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a",
-      "skipped": [],
-      "source": "github:skills/skills/productivity/writing-for-agents",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
-    "writing-fragments": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "298b0edd23df229183630de592ed8aa4289233560f2040691f6eb77caeaad4ea",
-      "skipped": [],
-      "source": "github:skills/skills/in-progress/writing-fragments",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
-    },
     "writing-plans": {
       "description_truncated": false,
       "files": 1,
@@ -20210,18 +19753,6 @@
           "source_repo": "hermes-agent"
         }
       ]
-    },
-    "writing-shape": {
-      "description_truncated": false,
-      "files": 2,
-      "license": "MIT",
-      "sellable": true,
-      "sha256": "f5e6c57bdd85178ace4a260c92f46da6b64ddee18215b461d875739c68976f72",
-      "skipped": [],
-      "source": "github:skills/skills/in-progress/writing-shape",
-      "source_repo": "skills",
-      "tier": "standard",
-      "variants": []
     },
     "writing-skills": {
       "description_truncated": false,
