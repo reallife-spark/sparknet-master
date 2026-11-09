@@ -169,9 +169,22 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, ShareError) as exc:
         print(f"sparknet-file-share: {exc}", file=sys.stderr)
         return 2
-    server = http.serve(router_for(share), bind=args.bind, port=args.port, public_keys=share.trusted_keys)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
-    thread.start()
+    router = router_for(share)
+    listener = http.listen(
+        [
+            http.Route(
+                "/",
+                lambda request: router(request.method, request.path, request.json or {}, request.identity),
+                auth="signed",
+                prefix=True,
+            )
+        ],
+        name="file-share",
+        bind=args.bind,
+        port=args.port,
+        public_keys=share.trusted_keys,
+    )
+    listener.start()
     stopping = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stopping.set())
     signal.signal(signal.SIGINT, lambda *_: stopping.set())
@@ -180,9 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         while not stopping.wait(1.0):
             pass
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        listener.stop()
     return 0
 
 

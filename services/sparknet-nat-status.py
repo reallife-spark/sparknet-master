@@ -158,9 +158,22 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, NatError) as exc:
         print(f"sparknet-nat-status: {exc}", file=sys.stderr)
         return 2
-    server = http.serve(router_for(status), bind=args.bind, port=args.port, public_keys=status.trusted_keys)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
-    thread.start()
+    router = router_for(status)
+    listener = http.listen(
+        [
+            http.Route(
+                "/",
+                lambda request: router(request.method, request.path, request.json or {}, request.identity),
+                auth="signed",
+                prefix=True,
+            )
+        ],
+        name="nat-status",
+        bind=args.bind,
+        port=args.port,
+        public_keys=status.trusted_keys,
+    )
+    listener.start()
     stopping = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stopping.set())
     signal.signal(signal.SIGINT, lambda *_: stopping.set())
@@ -169,9 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         while not stopping.wait(1.0):
             pass
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        listener.stop()
     return 0
 
 

@@ -244,9 +244,22 @@ def _load_keyring(values: list[str], authz: Any) -> dict[str, Any]:
 
 
 def _serve(http: Any, router: Any, *, bind: str, port: int, keyring: dict[str, Any]) -> None:
-    server = http.serve(router, bind=bind, port=port, public_keys=keyring, loopback_only_routes=("/admin",))
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
-    thread.start()
+    listener = http.listen(
+        [
+            http.Route(
+                "/",
+                lambda request: router(request.method, request.path, request.json or {}, request.identity),
+                auth="signed",
+                prefix=True,
+            )
+        ],
+        name="vector-serve",
+        bind=bind,
+        port=port,
+        public_keys=keyring,
+        loopback_only_routes=("/admin",),
+    )
+    listener.start()
     stopping = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stopping.set())
     signal.signal(signal.SIGINT, lambda *_: stopping.set())
@@ -255,9 +268,7 @@ def _serve(http: Any, router: Any, *, bind: str, port: int, keyring: dict[str, A
         while not stopping.wait(1.0):
             pass
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        listener.stop()
 
 
 def main(argv: list[str] | None = None) -> int:

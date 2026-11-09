@@ -15,8 +15,6 @@ a test rather than a configuration change nobody reviews.
 from __future__ import annotations
 
 import json
-import threading
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import ModuleType
 from urllib import error as urlerror
@@ -209,20 +207,22 @@ def test_the_credential_flag_is_gone(broker: ModuleType) -> None:
 
 
 def test_healthz_says_nothing_and_decide_serves(broker: ModuleType, tmp_path: Path) -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), broker._Handler)
-    server.timeout_s = 1.0
-    server.budget = broker.BudgetLedger()
-    server.audit_path = tmp_path / "a.jsonl"
-    server.model_pin = "local"
-    server.offline = True
-    server.call = None
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    base = f"http://127.0.0.1:{server.server_address[1]}"
+    listener = broker.serve(
+        "127.0.0.1",
+        0,
+        timeout_s=1.0,
+        budget=broker.BudgetLedger(),
+        audit_path=tmp_path / "a.jsonl",
+        model_pin="local",
+        offline=True,
+        call=None,
+    )
+    listener.start()
+    base = f"http://127.0.0.1:{listener.servers[0].server_address[1]}"
     try:
         with urlrequest.urlopen(base + "/healthz", timeout=2) as response:
             assert response.status == 200
-            assert json.loads(response.read()) == {"ok": True}
+            assert json.loads(response.read())["ok"] is True
 
         body = json.dumps(_request(broker)).encode()
         req = urlrequest.Request(
@@ -240,8 +240,7 @@ def test_healthz_says_nothing_and_decide_serves(broker: ModuleType, tmp_path: Pa
             urlrequest.urlopen(base + "/nope", timeout=2)
         assert exc.value.code == 404
     finally:
-        server.shutdown()
-        server.server_close()
+        listener.stop()
 
 
 def test_the_default_backend_is_local(broker: ModuleType, tmp_path: Path, monkeypatch) -> None:

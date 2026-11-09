@@ -415,10 +415,10 @@ def test_tampered_content_is_refused_before_install(
 
 
 def test_registry_route_is_not_a_discovery_surface(running_guard: int) -> None:
-    """Push only: there is nothing to GET, and no other path to POST to."""
+    """Push only: GET on the route is a method mismatch, and no other path to POST to."""
     with pytest.raises(urllib.error.HTTPError) as raised:
         urllib.request.urlopen(f"http://127.0.0.1:{running_guard}{PUBLICATION_ROUTE}", timeout=5)
-    assert raised.value.code == 404
+    assert raised.value.code == 405
 
     status, _body = _post(running_guard, {"anything": True}, path="/api/v1/elsewhere")
     assert status == 404

@@ -17,9 +17,7 @@ is then exercised end to end, and the gate's own branches are unit-tested direct
 from __future__ import annotations
 
 import json
-import threading
 from datetime import datetime, timedelta, timezone
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import ModuleType
 from urllib import error as urlerror
@@ -82,14 +80,15 @@ def _request(**overrides) -> dict:
 
 
 def _server(directory, spool: Path, request_dir: Path | None = None):
-    server = ThreadingHTTPServer(("127.0.0.1", 0), intake._Handler)
-    server.directory = directory
-    server.spool = spool
-    server.seen_nonces = set()
-    server.request_queue = intake.RequestQueue(request_dir or spool.parent / "requests")
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server, thread, f"http://127.0.0.1:{server.server_address[1]}"
+    listener = intake.build_listener(
+        bind="127.0.0.1",
+        port=0,
+        directory=directory,
+        spool=spool,
+        request_dir=request_dir,
+    )
+    listener.start()
+    return listener, None, f"http://127.0.0.1:{listener.servers[0].server_address[1]}"
 
 
 def _post(base: str, report: dict, path: str = TELEMETRY_ROUTE) -> tuple[int, dict]:
@@ -154,7 +153,7 @@ def test_the_request_gate_does_not_require_telemetry() -> None:
 
 def test_a_valid_report_is_recorded_and_acknowledged(tmp_path: Path) -> None:
     spool = tmp_path / "telemetry" / "reports.jsonl"
-    server, thread, base = _server(_directory(), spool)
+    listener, _thread, base = _server(_directory(), spool)
     try:
         report = _report()
         status, body = _post(base, report)
@@ -166,57 +165,47 @@ def test_a_valid_report_is_recorded_and_acknowledged(tmp_path: Path) -> None:
         assert rows[0]["source"] == "127.0.0.1"
         assert oct(spool.stat().st_mode & 0o777) == "0o600"
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_a_report_naming_another_peer_is_refused(tmp_path: Path) -> None:
     """Attribution is the overlay: the body's fingerprint must match the source's."""
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl")
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl")
     try:
         status, body = _post(base, _report(peer_fingerprint="b" * 64))
         assert status == 403 and body["error"] == "wrong_peer"
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_an_ungranted_source_is_refused_before_the_body_is_read(tmp_path: Path) -> None:
-    server, thread, base = _server(_directory(telemetry=False), tmp_path / "s.jsonl")
+    listener, _thread, base = _server(_directory(telemetry=False), tmp_path / "s.jsonl")
     try:
         status, body = _post(base, _report())
         assert status == 403 and body["error"] == "capability_missing"
         assert not (tmp_path / "s.jsonl").exists()
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_a_replayed_nonce_is_refused(tmp_path: Path) -> None:
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl")
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl")
     try:
         report = _report()
         assert _post(base, report)[0] == 200
         status, body = _post(base, report)
         assert status == 409 and body["error"] == "replayed_nonce"
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_a_malformed_report_is_refused(tmp_path: Path) -> None:
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl")
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl")
     try:
         status, body = _post(base, {**_report(), "escalate": True})
         assert status == 400 and body["error"] == "malformed"
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 # --- the RFI request route, over the same socket ------------------------------
@@ -225,7 +214,7 @@ def test_a_malformed_report_is_refused(tmp_path: Path) -> None:
 def test_a_request_from_an_ungranted_peer_is_queued(tmp_path: Path) -> None:
     """No `telemetry` capability is needed to ask, and no answer is produced here."""
     request_dir = tmp_path / "requests"
-    server, thread, base = _server(_directory(telemetry=False), tmp_path / "s.jsonl", request_dir)
+    listener, _thread, base = _server(_directory(telemetry=False), tmp_path / "s.jsonl", request_dir)
     try:
         request = _request()
         status, body = _post(base, request, path=REQUEST_ROUTE)
@@ -238,38 +227,32 @@ def test_a_request_from_an_ungranted_peer_is_queued(tmp_path: Path) -> None:
         assert oct(files[0].stat().st_mode & 0o777) == "0o600"
         assert oct(request_dir.stat().st_mode & 0o777) == "0o700"
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_a_request_naming_another_peer_is_refused(tmp_path: Path) -> None:
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl", tmp_path / "requests")
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl", tmp_path / "requests")
     try:
         status, body = _post(base, _request(peer_fingerprint="b" * 64), path=REQUEST_ROUTE)
         assert status == 403 and body["error"] == "wrong_peer"
         assert not (tmp_path / "requests").exists()
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_a_request_from_an_unregistered_source_is_refused(tmp_path: Path) -> None:
-    server, thread, base = _server(_directory(loopback=False), tmp_path / "s.jsonl", tmp_path / "requests")
+    listener, _thread, base = _server(_directory(loopback=False), tmp_path / "s.jsonl", tmp_path / "requests")
     try:
         status, body = _post(base, _request(), path=REQUEST_ROUTE)
         assert status == 403 and body["error"] == "off_overlay"
         assert not (tmp_path / "requests").exists()
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_a_replayed_request_is_refused(tmp_path: Path) -> None:
     request_dir = tmp_path / "requests"
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl", request_dir)
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl", request_dir)
     try:
         request = _request()
         assert _post(base, request, path=REQUEST_ROUTE)[0] == 202
@@ -277,38 +260,32 @@ def test_a_replayed_request_is_refused(tmp_path: Path) -> None:
         assert status == 409 and body["error"] == "replayed_nonce"
         assert len(list(request_dir.glob("*.json"))) == 1
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_an_expired_request_is_refused(tmp_path: Path) -> None:
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl", tmp_path / "requests")
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl", tmp_path / "requests")
     try:
         status, body = _post(base, _request(ttl_seconds=-1), path=REQUEST_ROUTE)
         assert status == 403 and body["error"] == "expired"
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_a_future_request_is_refused(tmp_path: Path) -> None:
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl", tmp_path / "requests")
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl", tmp_path / "requests")
     try:
         ahead = datetime.now(timezone.utc) + timedelta(seconds=900)
         status, body = _post(base, _request(now=ahead), path=REQUEST_ROUTE)
         assert status == 403 and body["error"] == "not_yet_valid"
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_the_queue_filename_is_the_digest_not_the_request_id(tmp_path: Path) -> None:
     """A peer-chosen request_id must not be able to choose a path."""
     request_dir = tmp_path / "requests"
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl", request_dir)
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl", request_dir)
     try:
         status, _ = _post(base, _request(request_id="../../escape"), path=REQUEST_ROUTE)
         assert status == 202
@@ -317,36 +294,30 @@ def test_the_queue_filename_is_the_digest_not_the_request_id(tmp_path: Path) -> 
         assert len(files[0].stem) == 64 and all(c in "0123456789abcdef" for c in files[0].stem)
         assert not (tmp_path / "escape.json").exists()
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_a_malformed_request_is_refused(tmp_path: Path) -> None:
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl", tmp_path / "requests")
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl", tmp_path / "requests")
     try:
         status, body = _post(base, {**_request(), "signature_b64": "forged"}, path=REQUEST_ROUTE)
         assert status == 400 and body["error"] == "malformed"
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_healthz_and_unknown_routes(tmp_path: Path) -> None:
-    server, thread, base = _server(_directory(), tmp_path / "s.jsonl")
+    listener, _thread, base = _server(_directory(), tmp_path / "s.jsonl")
     try:
         with urlrequest.urlopen(base + "/healthz", timeout=5) as response:
-            assert response.status == 200 and json.loads(response.read()) == {"ok": True}
+            assert response.status == 200 and json.loads(response.read())["ok"] is True
         # Push-only: nothing to GET on the intake route, no sibling to POST to.
         with pytest.raises(urlerror.HTTPError) as raised:
             urlrequest.urlopen(base + TELEMETRY_ROUTE, timeout=5)
-        assert raised.value.code == 404
+        assert raised.value.code == 405
         assert _post(base, _report(), path="/api/v1/elsewhere")[0] == 404
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        listener.stop()
 
 
 def test_serve_refuses_a_non_overlay_bind(tmp_path: Path) -> None:

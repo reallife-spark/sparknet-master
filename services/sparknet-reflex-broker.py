@@ -39,12 +39,11 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from sparknet_loader import load_by_path
+from sparknet_loader import load_by_path, load_shared
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = ROLE_ROOT.parent
@@ -66,6 +65,10 @@ def _load_reflex() -> Any:
     if "sparknet_reflex" in sys.modules:
         return sys.modules["sparknet_reflex"]
     return load_by_path("sparknet_reflex", REFLEX_PATH)
+
+
+def _load_http() -> Any:
+    return load_shared("sparknet-http.py", "sparknet_http_reflex", dirs=[REPO_ROOT / "shared"])
 
 
 reflex = _load_reflex()
@@ -210,67 +213,23 @@ def decide(
     return decision
 
 
-def _json_bytes(obj: Any) -> bytes:
-    return json.dumps(obj, separators=(",", ":")).encode("utf-8")
-
-
-class _Handler(BaseHTTPRequestHandler):
-    server_version = "sparknet-reflex-broker"
-    sys_version = ""
-
-    def log_message(self, fmt: str, *args: Any) -> None:
-        print(f"reflex-broker: {self.address_string()} {fmt % args}", file=sys.stderr)
-
-    def _send(self, status: int, body: dict[str, Any]) -> None:
-        data = _json_bytes(body)
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def do_GET(self) -> None:
-        if self.path == "/healthz":
-            self._send(200, {"ok": True})
-            return
-        self._send(404, {"error": "not_found"})
-
-    def do_POST(self) -> None:
-        if self.path != "/v1/reflex/decide":
-            self._send(404, {"error": "not_found"})
-            return
-        if not source_allowed(self.client_address[0]):
-            self._send(403, {"error": "off_overlay"})
-            return
-
-        length = int(self.headers.get("Content-Length", "0") or 0)
-        if length <= 0 or length > MAX_BODY:
-            self._send(413 if length > MAX_BODY else 400, {"error": "bad_length"})
-            return
-
-        try:
-            request = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._send(400, {"error": "bad_json"})
-            return
-
-        try:
-            decision = decide(
-                request,
-                call=self.server.call,  # type: ignore[attr-defined]
-                timeout_s=self.server.timeout_s,  # type: ignore[attr-defined]
-                budget=self.server.budget,  # type: ignore[attr-defined]
-                audit_path=self.server.audit_path,  # type: ignore[attr-defined]
-                model_pin=self.server.model_pin,  # type: ignore[attr-defined]
-                offline=self.server.offline,  # type: ignore[attr-defined]
-            )
-        except reflex.ReflexPolicyError as exc:
-            self._send(400, {"error": "contract", "detail": str(exc)})
-            return
-        except BrokerError as exc:
-            self._send(503, {"error": "unavailable", "detail": str(exc)})
-            return
-        self._send(200, decision)
+def _decide(
+    request: Any, *, call: Any, timeout_s: float, budget: BudgetLedger, audit_path: Path, model_pin: str, offline: bool
+) -> Any:
+    try:
+        return decide(
+            request.json,
+            call=call,
+            timeout_s=timeout_s,
+            budget=budget,
+            audit_path=audit_path,
+            model_pin=model_pin,
+            offline=offline,
+        )
+    except reflex.ReflexPolicyError as exc:
+        raise _load_http().RequestError(400, "contract", str(exc)) from exc
+    except BrokerError as exc:
+        raise _load_http().RequestError(503, "unavailable", str(exc)) from exc
 
 
 def serve(
@@ -286,15 +245,35 @@ def serve(
 ) -> None:
     if bind != DEFAULT_BIND and bind not in {"127.0.0.1", "::1"}:
         raise BrokerError("refuse to bind a non-overlay address (Phase 1 is overlay-only)")
-    server = ThreadingHTTPServer((bind, port), _Handler)
-    server.timeout_s = timeout_s  # type: ignore[attr-defined]
-    server.budget = budget  # type: ignore[attr-defined]
-    server.audit_path = audit_path  # type: ignore[attr-defined]
-    server.model_pin = model_pin  # type: ignore[attr-defined]
-    server.offline = offline  # type: ignore[attr-defined]
-    server.call = call  # type: ignore[attr-defined]
+    http = _load_http()
+
+    def route(request: Any) -> Any:
+        return _decide(
+            request,
+            call=call,
+            timeout_s=timeout_s,
+            budget=budget,
+            audit_path=audit_path,
+            model_pin=model_pin or "",
+            offline=offline,
+        )
+
+    listener = http.listen(
+        [
+            http.Route(
+                "/v1/reflex/decide",
+                route,
+                method="POST",
+                allowed_sources=frozenset(ALLOWED_SOURCES),
+                max_body=MAX_BODY,
+            )
+        ],
+        name="reflex-broker",
+        bind=bind,
+        port=port,
+    )
     print(f"reflex-broker: listening on {bind}:{port} (offline={offline})", file=sys.stderr)
-    server.serve_forever()
+    return listener
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -340,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
 
     budget = BudgetLedger(per_node_per_day=args.node_budget, global_per_day=args.global_budget)
     try:
-        serve(
+        listener = serve(
             args.bind,
             args.port,
             timeout_s=args.timeout,
@@ -349,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
             model_pin=model,
             offline=args.offline,
         )
+        listener.wait()
     except (BrokerError, OSError) as exc:
         print(f"reflex-broker: {exc}", file=sys.stderr)
         return 2

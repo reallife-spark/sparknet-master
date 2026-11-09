@@ -23,12 +23,10 @@ import os
 import socket
 import subprocess
 import sys
-import threading
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -244,14 +242,15 @@ def _start_telemetry_intake(peer_fp: str, spool: Path):
             }
         ]
     )
-    server = ThreadingHTTPServer(("127.0.0.1", 0), intake._Handler)
-    server.directory = directory
-    server.spool = spool
-    server.seen_nonces = set()
-    server.request_queue = intake.RequestQueue(spool.parent / "requests")
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server, thread, f"http://127.0.0.1:{server.server_address[1]}"
+    listener = intake.build_listener(
+        bind="127.0.0.1",
+        port=0,
+        directory=directory,
+        spool=spool,
+        request_dir=spool.parent / "requests",
+    )
+    listener.start()
+    return listener, listener, f"http://127.0.0.1:{listener.servers[0].server_address[1]}"
 
 
 def _write_telemetry_registry(vault: Path, master_key: Ed25519PrivateKey, capabilities=("telemetry",)) -> None:
@@ -328,14 +327,15 @@ def _start_intake(peer_fp: str, request_dir: Path):
             }
         ]
     )
-    server = ThreadingHTTPServer(("127.0.0.1", 0), intake._Handler)
-    server.directory = directory
-    server.spool = request_dir.parent / "telemetry.jsonl"
-    server.seen_nonces = set()
-    server.request_queue = intake.RequestQueue(request_dir)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server, thread, int(server.server_address[1])
+    listener = intake.build_listener(
+        bind="127.0.0.1",
+        port=0,
+        directory=directory,
+        spool=request_dir.parent / "telemetry.jsonl",
+        request_dir=request_dir,
+    )
+    listener.start()
+    return listener, listener, int(listener.servers[0].server_address[1])
 
 
 def _compose_from_request(
@@ -762,10 +762,10 @@ def test_an_unsafe_item_name_is_refused_and_writes_nothing(master_state, peer_va
 
 
 def test_the_rfi_route_is_not_a_discovery_surface(running_guard) -> None:
-    """Push only: there is nothing to GET, and no sibling path to POST to."""
+    """Push only: GET on the route is a method mismatch, and no sibling path to POST to."""
     with pytest.raises(urllib.error.HTTPError) as raised:
         urllib.request.urlopen(f"http://127.0.0.1:{running_guard}{RFI_ROUTE}", timeout=5)
-    assert raised.value.code == 404
+    assert raised.value.code == 405
     status, _body = _post(running_guard, {"anything": True}, path="/api/v1/elsewhere")
     assert status == 404
 

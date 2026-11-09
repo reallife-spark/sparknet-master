@@ -457,9 +457,22 @@ def _ratify_router(service: ShareRatifier):
 
 def _serve(service: ShareRatifier, *, bind: str, port: int, keyring: dict[str, Any]) -> None:
     http = _load_http()
-    server = http.serve(_ratify_router(service), bind=bind, port=port, public_keys=keyring)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
-    thread.start()
+    router = _ratify_router(service)
+    listener = http.listen(
+        [
+            http.Route(
+                "/",
+                lambda request: router(request.method, request.path, request.json or {}, request.identity),
+                auth="signed",
+                prefix=True,
+            )
+        ],
+        name="share-ratify",
+        bind=bind,
+        port=port,
+        public_keys=keyring,
+    )
+    listener.start()
     stopping = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stopping.set())
     signal.signal(signal.SIGINT, lambda *_: stopping.set())
@@ -468,9 +481,7 @@ def _serve(service: ShareRatifier, *, bind: str, port: int, keyring: dict[str, A
         while not stopping.wait(1.0):
             pass
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        listener.stop()
 
 
 def _read_request(path: str) -> Any:

@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import contextlib
 import hashlib
 import json
 import os
@@ -40,7 +39,6 @@ import urllib.request
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -405,128 +403,101 @@ class Intake:
         return {"ok": True, "sha256": digest, "path": str(target), "size": len(body)}
 
 
-def _handler(intake: Intake):
+def _identity(intake: Intake, request: Any) -> tuple[str, str, str, str]:
+    node_id = request.headers.get("X-Sparknet-Node-Id", "")
+    timestamp = request.headers.get("X-Sparknet-Timestamp", "")
+    signature = request.headers.get("X-Sparknet-Signature", "")
+    nonce = request.headers.get("X-Sparknet-Nonce", "")
+    if not (node_id and timestamp and signature and nonce):
+        raise Refusal(401, "unsigned", "node id, timestamp, nonce and signature are required")
+    intake.authorize(source=request.client[0], node_id=node_id, timestamp=timestamp, nonce=nonce)
+    return node_id, timestamp, signature, nonce
+
+
+def _authorize(intake: Intake, request: Any, node_id: str, timestamp: str, signature: str, nonce: str) -> None:
+    intake.verify_signature(
+        method=request.method,
+        path=request.path,
+        body_sha=hashlib.sha256(request.body).hexdigest(),
+        timestamp=timestamp,
+        node_id=node_id,
+        nonce=nonce,
+        signature=signature,
+    )
+
+
+def _inventory(intake: Intake, request: Any) -> Any:
+    node_id, timestamp, signature, nonce = _identity(intake, request)
+    _authorize(intake, request, node_id, timestamp, signature, nonce)
+    if not isinstance(request.json, dict):
+        raise Refusal(400, "malformed", "body is not a JSON object")
+    return intake.inventory(node_id=node_id, body=request.json, source=request.client[0])
+
+
+def _trace_batch(intake: Intake, request: Any) -> Any:
+    node_id, timestamp, signature, nonce = _identity(intake, request)
+    _authorize(intake, request, node_id, timestamp, signature, nonce)
+    if not isinstance(request.json, dict):
+        raise Refusal(400, "malformed", "body is not a JSON object")
+    return intake.trace_batch(node_id=node_id, body=request.json, source=request.client[0])
+
+
+def _artifact(intake: Intake, request: Any, kind: str) -> Any:
+    node_id, timestamp, signature, nonce = _identity(intake, request)
+    _authorize(intake, request, node_id, timestamp, signature, nonce)
+    return intake.artifact(
+        node_id=node_id, kind=kind, body=request.body, headers=request.headers, source=request.client[0]
+    )
+
+
+def _health(intake: Intake, request: Any = None) -> Any:
+    http = load_http()
+    return http.Response(200, {"ok": True, "service": "sparknet-uplift", "bind": intake.state.as_posix()})
+
+
+def build_listener(intake: Intake, *, bind: str, port: int) -> Any:
     http = load_http()
 
-    class Handler(http.TimeoutHandler):
-        timeout = http.DEFAULT_REQUEST_TIMEOUT_SECONDS
-        server_version = "sparknet-uplift/1"
+    def refusal(exc: BaseException) -> tuple[int, dict[str, Any]]:
+        return (
+            getattr(exc, "status", 500),
+            {"ok": False, "reason": getattr(exc, "reason", "internal"), "detail": getattr(exc, "detail", "")},
+        )
 
-        def log_message(self, fmt: str, *args: Any) -> None:
-            return
-
-        def _send(self, status: int, payload: dict[str, Any]) -> None:
-            body = json.dumps(payload, sort_keys=True).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            with contextlib.suppress(BrokenPipeError, ConnectionResetError):
-                self.wfile.write(body)
-
-        def _refuse(self, exc: Refusal) -> None:
-            self._send(exc.status, {"ok": False, "reason": exc.reason, "detail": exc.detail})
-
-        def _identity(self, body_sha: str) -> tuple[str, str, str, str, str]:
-            node_id = self.headers.get("X-Sparknet-Node-Id", "")
-            timestamp = self.headers.get("X-Sparknet-Timestamp", "")
-            signature = self.headers.get("X-Sparknet-Signature", "")
-            nonce = self.headers.get("X-Sparknet-Nonce", "")
-            if not (node_id and timestamp and signature and nonce):
-                raise Refusal(401, "unsigned", "node id, timestamp, nonce and signature are required")
-            return node_id, timestamp, signature, nonce, body_sha
-
-        def _preauthorize(self) -> tuple[str, str, str, str]:
-            node_id, timestamp, signature, nonce, _sha = self._identity("")
-            intake.authorize(
-                source=self.client_address[0],
-                node_id=node_id,
-                timestamp=timestamp,
-                nonce=nonce,
-            )
-            return node_id, timestamp, signature, nonce
-
-        def _authorize(self, *, body_sha: str, node_id: str, timestamp: str, signature: str, nonce: str) -> None:
-            intake.verify_signature(
-                method=self.command,
-                path=self.path,
-                body_sha=body_sha,
-                timestamp=timestamp,
-                node_id=node_id,
-                nonce=nonce,
-                signature=signature,
-            )
-
-        def _read(self, limit: int) -> tuple[bytes, str]:
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-            except ValueError as exc:
-                raise Refusal(400, "malformed", "bad Content-Length") from exc
-            if length <= 0 or length > limit:
-                raise Refusal(400, "malformed", "empty or oversized body")
-            body = self.rfile.read(length)
-            if len(body) != length:
-                raise Refusal(400, "truncated", "body shorter than Content-Length")
-            return body, hashlib.sha256(body).hexdigest()
-
-        def do_GET(self) -> None:
-            if self.path == "/v1/health":
-                self._send(200, {"ok": True, "service": "sparknet-uplift", "bind": intake.state.as_posix()})
-                return
-            self._send(404, {"ok": False, "reason": "not-found"})
-
-        def do_POST(self) -> None:
-            try:
-                if self.path == "/api/v1/inventory":
-                    node_id, stamp, signature, nonce = self._preauthorize()
-                    body, digest = self._read(MAX_JSON)
-                    self._authorize(body_sha=digest, node_id=node_id, timestamp=stamp, signature=signature, nonce=nonce)
-                    payload = json.loads(body.decode("utf-8"))
-                    if not isinstance(payload, dict):
-                        raise Refusal(400, "malformed", "body is not a JSON object")
-                    result = intake.inventory(node_id=node_id, body=payload, source=self.client_address[0])
-                elif self.path == "/api/v1/trace-batch":
-                    node_id, stamp, signature, nonce = self._preauthorize()
-                    body, digest = self._read(MAX_JSON)
-                    self._authorize(body_sha=digest, node_id=node_id, timestamp=stamp, signature=signature, nonce=nonce)
-                    payload = json.loads(body.decode("utf-8"))
-                    result = intake.trace_batch(node_id=node_id, body=payload, source=self.client_address[0])
-                elif self.path == "/api/v1/vector-snapshot":
-                    node_id, stamp, signature, nonce = self._preauthorize()
-                    body, digest = self._read(MAX_ARTIFACT)
-                    self._authorize(body_sha=digest, node_id=node_id, timestamp=stamp, signature=signature, nonce=nonce)
-                    result = intake.artifact(
-                        node_id=node_id, kind="snapshot", body=body, headers=self.headers, source=self.client_address[0]
-                    )
-                elif self.path == "/api/v1/kv-artifact":
-                    node_id, stamp, signature, nonce = self._preauthorize()
-                    body, digest = self._read(MAX_ARTIFACT)
-                    self._authorize(body_sha=digest, node_id=node_id, timestamp=stamp, signature=signature, nonce=nonce)
-                    result = intake.artifact(
-                        node_id=node_id, kind="kv", body=body, headers=self.headers, source=self.client_address[0]
-                    )
-                else:
-                    self._send(404, {"ok": False, "reason": "not-found"})
-                    return
-            except Refusal as exc:
-                self._refuse(exc)
-                return
-            except json.JSONDecodeError as exc:
-                self._send(400, {"ok": False, "reason": "malformed", "detail": str(exc)})
-                return
-            except Exception as exc:  # pragma: no cover - defensive
-                self._send(500, {"ok": False, "reason": "internal", "detail": str(exc)})
-                return
-            self._send(200, result)
-
-    return Handler
+    return http.listen(
+        [
+            http.Route("/v1/health", lambda request: _health(intake), method="GET", parse_json=False, max_body=0),
+            http.Route(
+                "/api/v1/inventory", lambda request: _inventory(intake, request), method="POST", max_body=MAX_JSON
+            ),
+            http.Route(
+                "/api/v1/trace-batch", lambda request: _trace_batch(intake, request), method="POST", max_body=MAX_JSON
+            ),
+            http.Route(
+                "/api/v1/vector-snapshot",
+                lambda request: _artifact(intake, request, "snapshot"),
+                method="POST",
+                parse_json=False,
+                max_body=MAX_ARTIFACT,
+            ),
+            http.Route(
+                "/api/v1/kv-artifact",
+                lambda request: _artifact(intake, request, "kv"),
+                method="POST",
+                parse_json=False,
+                max_body=MAX_ARTIFACT,
+            ),
+        ],
+        name="uplift-intake",
+        bind=bind,
+        port=port,
+        refusal=refusal,
+        refusal_errors=(Refusal,),
+    )
 
 
-def serve(intake: Intake, *, bind: str, port: int) -> ThreadingHTTPServer:
-    handler = _handler(intake)
-    server = ThreadingHTTPServer((bind, port), handler)
-    server.daemon_threads = True
-    return server
+def serve(intake: Intake, *, bind: str, port: int) -> Any:
+    return build_listener(intake, bind=bind, port=port)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -552,14 +523,12 @@ def main(argv: list[str] | None = None) -> int:
     if not args.serve:
         parser.print_help()
         return 0
-    server = serve(intake, bind=args.bind, port=args.port)
+    listener = serve(intake, bind=args.bind, port=args.port)
     print(f"uplift-intake: listening on {args.bind}:{args.port}; state={intake.state}", file=sys.stderr)
     try:
-        server.serve_forever()
+        listener.wait()
     except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+        listener.stop()
     return 0
 
 

@@ -87,7 +87,6 @@ import re
 import sys
 import tempfile
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -489,210 +488,162 @@ class RequestQueue:
 # --- HTTP surface -------------------------------------------------------------
 
 
-def _json_bytes(obj: Any) -> bytes:
-    return json.dumps(obj, separators=(",", ":")).encode("utf-8")
+def _telemetry(directory: Any, spool: Path, seen_nonces: set[str], request: Any) -> tuple[int, dict[str, Any]]:
+    client = request.client[0]
+    # Attribution first: an unregistered, revoked or ungranted source is refused
+    # without parsing anything it sent.
+    fingerprint, reason = directory.attribute(client)
+    if fingerprint is None:
+        return REFUSAL_STATUS.get(reason, 403), {"error": reason}
+    report = request.json
+    if not isinstance(report, dict):
+        return 400, {"error": "malformed"}
+    ok, verify_reason = authz.verify_telemetry_report(report, expected_fingerprint=fingerprint, seen_nonces=seen_nonces)
+    if not ok:
+        return REFUSAL_STATUS.get(verify_reason, 400), {"error": verify_reason}
+    spooled = record_report(spool, report, source=client)
+    seen_nonces.add(str(report["nonce"]))
+    return 200, {"status": "recorded", "kind": report["kind"], "nonce": report["nonce"], "spooled": spooled}
 
 
-class _Handler(BaseHTTPRequestHandler):
-    server_version = "sparknet-peer-intake"
-    sys_version = ""
+def _rfi_request(directory: Any, queue: RequestQueue, request: Any) -> tuple[int, dict[str, Any]]:
+    client = request.client[0]
+    # Registered and not revoked, but no telemetry capability: asking is not
+    # reporting. The overlay is still the attribution.
+    fingerprint, reason = directory.attribute(client, capability=None)
+    if fingerprint is None:
+        return REFUSAL_STATUS.get(reason, 403), {"error": reason}
+    payload = request.json
+    if not isinstance(payload, dict):
+        return 400, {"error": "malformed"}
+    ok, verify_reason = authz.verify_rfi_request(payload, expected_fingerprint=fingerprint, seen_nonces=queue.seen)
+    if not ok:
+        return REFUSAL_STATUS.get(verify_reason, 400), {"error": verify_reason}
+    try:
+        artifact = queue.record(payload)
+    except OSError as exc:
+        # A request the Master cannot queue is not accepted; unlike telemetry
+        # (evidence), silently acking would tell the peer a question is waiting
+        # when no composer can find it. The peer may retry the same nonce.
+        print(f"peer-intake: request queue write failed: {exc}", file=sys.stderr)
+        return 503, {"error": "queue_unavailable"}
+    queue.seen.add(str(payload["nonce"]))
+    print(f"peer-intake: queued RFI request {payload['request_id']} -> {artifact.name}", file=sys.stderr)
+    return 202, {"status": "queued", "request_id": payload["request_id"]}
 
-    def log_message(self, fmt: str, *args: Any) -> None:
-        print(f"peer-intake: {self.address_string()} {fmt % args}", file=sys.stderr)
 
-    def _send(self, status: int, body: dict[str, Any]) -> None:
-        data = _json_bytes(body)
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+def _issues(
+    directory: Any, issue_keys: dict[str, Any], issue_store: IssueStore, request: Any
+) -> tuple[int, dict[str, Any]]:
+    """Accept one signed work item. The route carries no authority.
 
-    def do_GET(self) -> None:
-        if self.path == "/healthz":
-            self._send(200, {"ok": True})
-            return
-        self._send(404, {"error": "not_found"})
+    Order: source/capability gate, raw body, key lookup, signature, freshness,
+    redaction, schema/digest/expiry/replay, store. The overlay identifies the
+    source; the trusted key identifies the signer; the registry entry ties the
+    two node ids together, so a valid key for one node cannot post as another.
+    """
+    client = request.client[0]
+    fingerprint, reason = directory.attribute(client, capability="issue-report")
+    if fingerprint is None:
+        return REFUSAL_STATUS.get(reason, 403), {"error": reason}
+    report = request.json
+    if not isinstance(report, dict):
+        return 400, {"error": "malformed"}
+    node_id = str(report.get("node_id") or "")
+    entry = directory.entry_for(client)
+    if entry is None:
+        return 403, {"error": "off_overlay"}
+    entry_identity = entry.get("identity") if isinstance(entry.get("identity"), dict) else {}
+    entry_node = str(entry_identity.get("node_id") or entry.get("node_id") or "")
+    if not node_id or entry_node != node_id:
+        return 403, {"error": "wrong_peer"}
+    key = issue_keys.get(node_id)
+    if key is None:
+        return 403, {"error": "unknown_key"}
+    timestamp = request.headers.get("X-Sparknet-Timestamp", "")
+    signature = request.headers.get("X-Sparknet-Signature", "")
+    if not timestamp or not signature:
+        return 401, {"error": "unsigned"}
+    try:
+        message = http.request_message("POST", "/api/v1/issues", request.body, timestamp)
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return 400, {"error": "malformed"}
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    if abs((datetime.now(timezone.utc) - parsed).total_seconds()) > ISSUE_MAX_AGE_SECONDS:
+        return 401, {"error": "stale"}
+    try:
+        signed = authz.verify_signature(key, signature, message)
+    except Exception:
+        signed = False
+    if not signed:
+        return 401, {"error": "bad_signature"}
+    text = f"{report.get('title', '')}\n{report.get('body', '')}"
+    if any(pattern.search(text) for pattern in ISSUE_SECRET_PATTERNS):
+        return 400, {"error": "secret_shaped"}
+    ok, verify_reason = authz.verify_issue_report(
+        report, expected_fingerprint=fingerprint, seen_nonces=issue_store.seen_nonces
+    )
+    if not ok:
+        return REFUSAL_STATUS.get(verify_reason, 400), {"error": verify_reason}
+    try:
+        outcome = issue_store.record(report, source=client)
+    except OSError as exc:
+        print(f"peer-intake: issue store write failed: {exc}", file=sys.stderr)
+        return 503, {"error": "store_unavailable"}
+    return 200, {"status": outcome, "issue_id": report["issue_id"], "node_id": node_id}
 
-    def do_POST(self) -> None:
-        if self.path == "/api/v1/telemetry":
-            self._telemetry()
-        elif self.path == "/api/v1/rfi-request":
-            self._rfi_request()
-        elif self.path == "/api/v1/issues":
-            self._issues()
-        else:
-            self._send(404, {"error": "not_found"})
 
-    def _read_raw(self) -> tuple[bytes | None, str, int]:
-        try:
-            length = int(self.headers.get("Content-Length", "0") or 0)
-        except ValueError:
-            return None, "malformed", 400
-        if length <= 0 or length > MAX_BODY:
-            return None, "malformed", 413 if length > MAX_BODY else 400
-        raw = self.rfile.read(length)
-        if len(raw) != length:
-            return None, "malformed", 400
-        return raw, "", 0
+def build_listener(
+    *,
+    bind: str,
+    port: int,
+    directory: PeerDirectory,
+    spool: Path,
+    request_dir: Path | str | None = None,
+    seen_nonces: set[str] | None = None,
+    request_queue: RequestQueue | None = None,
+    issue_keys: dict[str, Any] | None = None,
+    issue_store: IssueStore | None = None,
+) -> Any:
+    """Build the route-table listener; the caller owns start/stop."""
+    queue = request_queue if request_queue is not None else RequestQueue(request_dir or default_request_dir())
+    seen = seen_nonces if seen_nonces is not None else spool_nonces(spool)
+    keys = dict(issue_keys or {})
+    store = issue_store if issue_store is not None else IssueStore(default_issue_store())
 
-    def _read_body(self) -> tuple[dict[str, Any] | None, str, int]:
-        """Read one JSON object, or (None, reason, status) before any work is done."""
-        raw, reason, status = self._read_raw()
-        if raw is None:
-            return None, reason, status
-        try:
-            body = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            return None, "malformed", 400
-        if not isinstance(body, dict):
-            return None, "malformed", 400
-        return body, "", 0
+    def refusal(exc: BaseException) -> tuple[int, dict[str, Any]]:
+        status = getattr(exc, "status", 500)
+        reason = getattr(exc, "reason", "internal")
+        return status, {"error": reason}
 
-    def _telemetry(self) -> None:
-        client = self.client_address[0]
-        # Attribution first, before the body is read: an unregistered, revoked or
-        # ungranted source is refused without parsing anything it sent.
-        fingerprint, reason = self.server.directory.attribute(client)  # type: ignore[attr-defined]
-        if fingerprint is None:
-            self._send(REFUSAL_STATUS.get(reason, 403), {"error": reason})
-            return
-
-        report, reason, status = self._read_body()
-        if report is None:
-            self._send(status, {"error": reason})
-            return
-
-        seen = self.server.seen_nonces  # type: ignore[attr-defined]
-        ok, verify_reason = authz.verify_telemetry_report(report, expected_fingerprint=fingerprint, seen_nonces=seen)
-        if not ok:
-            self._send(REFUSAL_STATUS.get(verify_reason, 400), {"error": verify_reason})
-            return
-
-        spool = self.server.spool  # type: ignore[attr-defined]
-        spooled = record_report(spool, report, source=client)
-        seen.add(str(report["nonce"]))
-        self._send(
-            200,
-            {"status": "recorded", "kind": report["kind"], "nonce": report["nonce"], "spooled": spooled},
-        )
-
-    def _rfi_request(self) -> None:
-        client = self.client_address[0]
-        # Registered and not revoked, but no telemetry capability: asking is not
-        # reporting. The overlay is still the attribution.
-        fingerprint, reason = self.server.directory.attribute(client, capability=None)  # type: ignore[attr-defined]
-        if fingerprint is None:
-            self._send(REFUSAL_STATUS.get(reason, 403), {"error": reason})
-            return
-
-        request, reason, status = self._read_body()
-        if request is None:
-            self._send(status, {"error": reason})
-            return
-
-        queue = self.server.request_queue  # type: ignore[attr-defined]
-        ok, verify_reason = authz.verify_rfi_request(request, expected_fingerprint=fingerprint, seen_nonces=queue.seen)
-        if not ok:
-            self._send(REFUSAL_STATUS.get(verify_reason, 400), {"error": verify_reason})
-            return
-
-        try:
-            artifact = queue.record(request)
-        except OSError as exc:
-            # A request the Master cannot queue is not accepted; unlike telemetry
-            # (evidence), silently acking would tell the peer a question is waiting
-            # when no composer can find it. The peer may retry the same nonce.
-            print(f"peer-intake: request queue write failed: {exc}", file=sys.stderr)
-            self._send(503, {"error": "queue_unavailable"})
-            return
-
-        queue.seen.add(str(request["nonce"]))
-        print(f"peer-intake: queued RFI request {request['request_id']} -> {artifact.name}", file=sys.stderr)
-        self._send(202, {"status": "queued", "request_id": request["request_id"]})
-
-    def _issues(self) -> None:
-        """Accept one signed work item. The route carries no authority.
-
-        Order: source/capability gate, raw body, key lookup, signature, freshness,
-        redaction, schema/digest/expiry/replay, store. The overlay identifies the
-        source; the trusted key identifies the signer; the registry entry ties the
-        two node ids together, so a valid key for one node cannot post as another.
-        """
-        client = self.client_address[0]
-        fingerprint, reason = self.server.directory.attribute(client, capability="issue-report")  # type: ignore[attr-defined]
-        if fingerprint is None:
-            self._send(REFUSAL_STATUS.get(reason, 403), {"error": reason})
-            return
-        raw, reason, status = self._read_raw()
-        if raw is None:
-            self._send(status, {"error": reason})
-            return
-        try:
-            report = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._send(400, {"error": "malformed"})
-            return
-        if not isinstance(report, dict):
-            self._send(400, {"error": "malformed"})
-            return
-        node_id = str(report.get("node_id") or "")
-        entry = self.server.directory.entry_for(client)  # type: ignore[attr-defined]
-        if entry is None:
-            self._send(403, {"error": "off_overlay"})
-            return
-        entry_identity = entry.get("identity") if isinstance(entry.get("identity"), dict) else {}
-        entry_node = str(entry_identity.get("node_id") or entry.get("node_id") or "")
-        if not node_id or entry_node != node_id:
-            self._send(403, {"error": "wrong_peer"})
-            return
-        key = self.server.issue_keys.get(node_id, None)  # type: ignore[attr-defined]
-        if key is None:
-            self._send(403, {"error": "unknown_key"})
-            return
-        timestamp = self.headers.get("X-Sparknet-Timestamp", "")
-        signature = self.headers.get("X-Sparknet-Signature", "")
-        if not timestamp or not signature:
-            self._send(401, {"error": "unsigned"})
-            return
-        try:
-            message = http.request_message("POST", "/api/v1/issues", raw, timestamp)
-            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            self._send(400, {"error": "malformed"})
-            return
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        if abs((datetime.now(timezone.utc) - parsed).total_seconds()) > ISSUE_MAX_AGE_SECONDS:
-            self._send(401, {"error": "stale"})
-            return
-        try:
-            signed = authz.verify_signature(key, signature, message)
-        except Exception:
-            signed = False
-        if not signed:
-            self._send(401, {"error": "bad_signature"})
-            return
-        text = f"{report.get('title', '')}\n{report.get('body', '')}"
-        if any(pattern.search(text) for pattern in ISSUE_SECRET_PATTERNS):
-            self._send(400, {"error": "secret_shaped"})
-            return
-        store = self.server.issue_store  # type: ignore[attr-defined]
-        ok, verify_reason = authz.verify_issue_report(
-            report,
-            expected_fingerprint=fingerprint,
-            seen_nonces=store.seen_nonces,
-        )
-        if not ok:
-            self._send(REFUSAL_STATUS.get(verify_reason, 400), {"error": verify_reason})
-            return
-        try:
-            outcome = store.record(report, source=client)
-        except OSError as exc:
-            print(f"peer-intake: issue store write failed: {exc}", file=sys.stderr)
-            self._send(503, {"error": "store_unavailable"})
-            return
-        self._send(200, {"status": outcome, "issue_id": report["issue_id"], "node_id": node_id})
+    return http.listen(
+        [
+            http.Route(
+                "/api/v1/telemetry",
+                lambda request: _telemetry(directory, spool, seen, request),
+                method="POST",
+                max_body=MAX_BODY,
+            ),
+            http.Route(
+                "/api/v1/rfi-request",
+                lambda request: _rfi_request(directory, queue, request),
+                method="POST",
+                max_body=MAX_BODY,
+            ),
+            http.Route(
+                "/api/v1/issues",
+                lambda request: _issues(directory, keys, store, request),
+                method="POST",
+                max_body=MAX_BODY,
+            ),
+        ],
+        name="peer-intake",
+        bind=bind,
+        port=port,
+        refusal=refusal,
+    )
 
 
 def serve(
@@ -706,20 +657,22 @@ def serve(
     request_queue: RequestQueue | None = None,
     issue_keys: dict[str, Any] | None = None,
     issue_store: IssueStore | None = None,
-) -> None:
+) -> Any:
     if bind != DEFAULT_BIND and bind not in {"127.0.0.1", "::1"}:
         raise IntakeError("refuse to bind a non-overlay address (the intake is overlay-only)")
-    server = ThreadingHTTPServer((bind, port), _Handler)
-    server.directory = directory  # type: ignore[attr-defined]
-    server.spool = spool  # type: ignore[attr-defined]
-    server.seen_nonces = seen_nonces if seen_nonces is not None else spool_nonces(spool)  # type: ignore[attr-defined]
-    server.request_queue = (  # type: ignore[attr-defined]
-        request_queue if request_queue is not None else RequestQueue(request_dir or default_request_dir())
+    listener = build_listener(
+        bind=bind,
+        port=port,
+        directory=directory,
+        spool=spool,
+        request_dir=request_dir,
+        seen_nonces=seen_nonces,
+        request_queue=request_queue,
+        issue_keys=issue_keys,
+        issue_store=issue_store,
     )
-    server.issue_keys = dict(issue_keys or {})  # type: ignore[attr-defined]
-    server.issue_store = issue_store if issue_store is not None else IssueStore(default_issue_store())  # type: ignore[attr-defined]
     print(f"peer-intake: listening on {bind}:{port}", file=sys.stderr)
-    server.serve_forever()
+    return listener
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -802,7 +755,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"peer-intake: cannot load the registry: {exc}", file=sys.stderr)
         return 2
     try:
-        serve(
+        listener = serve(
             args.bind,
             args.port,
             directory=directory,
@@ -811,6 +764,7 @@ def main(argv: list[str] | None = None) -> int:
             issue_keys=issue_keys,
             issue_store=IssueStore(issue_store),
         )
+        listener.wait()
     except (IntakeError, OSError) as exc:
         print(f"peer-intake: {exc}", file=sys.stderr)
         return 2

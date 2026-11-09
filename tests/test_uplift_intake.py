@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sys
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -95,10 +94,9 @@ def _serve(service, tmp_path: Path, authz, *, capabilities=None):
     keys = {"peer-1": authz.load_public_key(pub_path)}
     intake = service.Intake(state=tmp_path / "uplift", registry=registry, keys=keys)
     port = _free_port()
-    server = service.serve(intake, bind="127.0.0.1", port=port)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
-    thread.start()
-    return server, thread, port, state
+    listener = service.serve(intake, bind="127.0.0.1", port=port)
+    listener.start()
+    return listener, None, port, state
 
 
 def _client_env(pusher, monkeypatch, state: Path, port: int):
@@ -110,7 +108,7 @@ def _client_env(pusher, monkeypatch, state: Path, port: int):
 
 
 def test_inventory_and_snapshot_round_trip(service, authz, pusher, tmp_path, monkeypatch):
-    server, thread, port, state = _serve(service, tmp_path, authz)
+    listener, _thread, port, state = _serve(service, tmp_path, authz)
     try:
         _client_env(pusher, monkeypatch, state, port)
         records = [
@@ -137,13 +135,11 @@ def test_inventory_and_snapshot_round_trip(service, authz, pusher, tmp_path, mon
         files = list((tmp_path / "uplift" / "snapshots" / "peer-1" / "sparknet-peer").glob("*.snapshot"))
         assert files and files[0].read_bytes() == snapshot
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=3)
+        listener.stop()
 
 
 def test_a_tampered_snapshot_manifest_is_refused(service, authz, pusher, tmp_path, monkeypatch):
-    server, thread, port, state = _serve(service, tmp_path, authz)
+    listener, _thread, port, state = _serve(service, tmp_path, authz)
     try:
         _client_env(pusher, monkeypatch, state, port)
         body = b"snapshot-bytes"
@@ -151,19 +147,15 @@ def test_a_tampered_snapshot_manifest_is_refused(service, authz, pusher, tmp_pat
         assert pusher.send("snapshot", body, manifest, endpoint=f"http://127.0.0.1:{port}") is False
         assert not list((tmp_path / "uplift" / "snapshots").rglob("*.snapshot"))
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=3)
+        listener.stop()
 
 
 def test_a_peer_without_model_uplift_is_refused(service, authz, pusher, tmp_path, monkeypatch):
-    server, thread, port, state = _serve(service, tmp_path, authz, capabilities=[])
+    listener, _thread, port, state = _serve(service, tmp_path, authz, capabilities=[])
     try:
         _client_env(pusher, monkeypatch, state, port)
         body = json.dumps({"inventory": []}).encode()
         assert pusher.send("inventory", body, {"rows": 0}, endpoint=f"http://127.0.0.1:{port}") is False
         assert not (tmp_path / "uplift" / "inventory" / "peer-1.jsonl").exists()
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=3)
+        listener.stop()
