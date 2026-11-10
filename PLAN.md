@@ -1,6 +1,6 @@
 ---
 title: sparknet master-node Plan
-updated: 2026-11-09
+updated: 2026-11-10
 current: 28
 ---
 
@@ -278,6 +278,9 @@ current: 28
     `(node_id, issue_id)`.
   - [x] **28C — Store and triage.** Append to `/mnt/log/sparknet-issues.jsonl`
     and keep a local triage state; add `GET /api/issues` and the Issues tab.
+    Fabric 93B completes the writer: append-only
+    `<state-dir>/issues/triage.jsonl`, derived `triage.json`, and
+    `scripts/sparknet-issue-triage.py`.
   - [x] **28D — Console.** The shared Understand and Issues tabs render for the
     Master role with the master config.
   - **DoD**: `make -C master-node test`, `make contract-test`,
@@ -290,7 +293,8 @@ current: 28
     longer shadows the 80-skill base suite (1614 role-local), the local tracker
     and docs are in place, `POST /api/v1/issues` verifies the signature,
     overlay fingerprint, capability, digest, expiry and replay and appends to
-    the issue store, and the console exposes the issues read-only. `make ci`,
+    the issue store, and the console exposes the issues read-only. Fabric 93B
+    adds the append-only triage writer and derived view. `make ci`,
     `make -C master-node test` and `make bundle-verify ROLE=master` are green.
     Live peer delivery is `DoD: confirm: user`.
 

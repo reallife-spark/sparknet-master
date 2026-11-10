@@ -83,7 +83,6 @@ import contextlib
 import hashlib
 import json
 import os
-import re
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -97,6 +96,7 @@ ROLE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = ROLE_ROOT.parent
 AUTHZ_PATH = REPO_ROOT / "shared" / "sparknet-authz.py"
 HTTP_PATH = REPO_ROOT / "shared" / "sparknet-http.py"
+ISSUE_PATH = REPO_ROOT / "shared" / "sparknet-issue.py"
 
 DEFAULT_BIND = "10.100.0.1"
 DEFAULT_PORT = 8090
@@ -104,13 +104,6 @@ DEFAULT_REGISTRY = ROLE_ROOT / "manifests" / "node-authorizations.json"
 DEFAULT_REQUEST_DIR = "/mnt/log/sparknet-rfi-requests"
 MAX_BODY = 256 * 1024
 ISSUE_MAX_AGE_SECONDS = 300
-ISSUE_SECRET_PATTERNS = (
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    re.compile(r"(?i)\b(api[_-]?key|token|password|passwd|secret|private[_-]?key)\b\s*[:=]\s*[A-Za-z0-9_./+=~-]{12,}"),
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),
-    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
-)
 
 #: Refusal reason -> HTTP status. `off_overlay`, `revoked` and `capability_missing`
 #: are the source gate's; the rest come from ``authz.verify_telemetry_report``.
@@ -150,6 +143,16 @@ def _load_http() -> Any:
 
 
 http = _load_http()
+
+
+def _load_issue() -> Any:
+    if "sparknet_intake_issue" in sys.modules:
+        return sys.modules["sparknet_intake_issue"]
+    return load_by_path("sparknet_intake_issue", ISSUE_PATH)
+
+
+issue = _load_issue()
+IssueStore = issue.IssueStore
 
 
 class IntakeError(Exception):
@@ -287,84 +290,7 @@ class PeerDirectory:
 
 
 def default_issue_store() -> Path:
-    env = os.environ.get("SPARKNET_ISSUE_STORE", "").strip()
-    return Path(env) if env else Path("/mnt/log/sparknet-issues.jsonl")
-
-
-class IssueStore:
-    """Append-only evidence for peer work items, with a latest-view index.
-
-    One JSON object per accepted report. The latest view is keyed by
-    ``(node_id, issue_id)`` and only moves forward on ``updated_at``; a re-send
-    of the same bytes is acknowledged and appends nothing. The nonce set is
-    rebuilt from the file, so a restart cannot replay an old report.
-    """
-
-    def __init__(self, path: Path | str, *, state_dir: Path | str | None = None) -> None:
-        self.path = Path(path)
-        self.state_dir = Path(state_dir) if state_dir else self.path.parent / "issues"
-        self.seen_nonces: set[str] = set()
-        self.latest: dict[tuple[str, str], dict[str, Any]] = {}
-        self.load()
-
-    def load(self) -> None:
-        self.seen_nonces.clear()
-        self.latest.clear()
-        if not self.path.is_file():
-            return
-        try:
-            lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            return
-        for line in lines:
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(row, dict):
-                continue
-            nonce = row.get("nonce")
-            if isinstance(nonce, str) and nonce:
-                self.seen_nonces.add(nonce)
-            key = (str(row.get("node_id") or ""), str(row.get("issue_id") or ""))
-            if not all(key):
-                continue
-            current = self.latest.get(key)
-            if current is None or str(row.get("updated_at") or "") >= str(current.get("updated_at") or ""):
-                self.latest[key] = row
-
-    def record(self, report: dict[str, Any], *, source: str) -> str:
-        key = (str(report["node_id"]), str(report["issue_id"]))
-        current = self.latest.get(key)
-        if current is not None and str(report["updated_at"]) <= str(current.get("updated_at") or ""):
-            self.seen_nonces.add(str(report["nonce"]))
-            return "duplicate"
-        row = {
-            "received_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
-            "received_from": _bare(source),
-            **report,
-        }
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        with contextlib.suppress(OSError):
-            os.chmod(self.path, 0o600)
-        self.latest[key] = row
-        self.seen_nonces.add(str(report["nonce"]))
-        self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        return "recorded"
-
-    def listing(self) -> list[dict[str, Any]]:
-        return sorted(
-            self.latest.values(),
-            key=lambda row: (
-                str(row.get("received_at") or ""),
-                str(row.get("node_id") or ""),
-                str(row.get("issue_id") or ""),
-            ),
-        )
+    return issue.default_issue_store()
 
 
 def default_spool() -> Path:
@@ -579,9 +505,14 @@ def _issues(
         signed = False
     if not signed:
         return 401, {"error": "bad_signature"}
-    text = f"{report.get('title', '')}\n{report.get('body', '')}"
-    if any(pattern.search(text) for pattern in ISSUE_SECRET_PATTERNS):
-        return 400, {"error": "secret_shaped"}
+    body = report.get("body")
+    try:
+        issue.redact(
+            {"title": report.get("title", ""), "links": report.get("links", [])},
+            body if isinstance(body, str) else "",
+        )
+    except issue.IssueError as exc:
+        return 400, {"error": exc.reason if exc.reason == "secret_shaped" else "malformed"}
     ok, verify_reason = authz.verify_issue_report(
         report, expected_fingerprint=fingerprint, seen_nonces=issue_store.seen_nonces
     )

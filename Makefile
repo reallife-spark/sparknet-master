@@ -39,7 +39,7 @@ REASON ?=
         env-show parity ledger evidence-capture review-agents keygen keys-check units units-check step89-admin \
         signer signer-unit reflex-unit peer-intake-unit rfi-responder-unit wg-observer-unit nocturnal-probe-unit console vault-health vault-heal \
         provenance-verify user-init provenance-append ingest precommit shims-check context-pack context-check governance-check \
-        bundle wiki-preflight wiki-status wiki-lint wiki-query skills-sync skills-check vector-reindex vector-serve uplift-intake uplift-intake-unit uplift-intake-check distill distill-doctor distill-trainer-help distill-dataset distill-run distill-status file-share-serve nat-status-serve share-ratify-unit share-ratify-serve share-ratify-list share-ratify-approve share-ratify-refuse clean
+        bundle wiki-preflight wiki-status wiki-lint wiki-query skills-sync skills-check vector-reindex vector-serve uplift-intake uplift-intake-unit uplift-intake-check distill distill-doctor distill-trainer-help distill-dataset distill-run distill-status file-share-serve nat-status-serve share-ratify-unit share-ratify-serve share-ratify-list share-ratify-approve share-ratify-refuse issue-triage clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -178,6 +178,9 @@ evidence-capture: ## Capture one evidence event from EVENT (JSON file, - for std
 
 step89-admin: ## Compose/apply signed Step 89 writes (lake, collab, distill, packages)
 	@$(PY) "$(VAULT_ROOT)/services/sparknet-step89-admin.py" $(ARGS)
+
+issue-triage: ## Record a local issue triage transition (ARGS="--node-id ... --issue-id ... --status ...")
+	@$(PY) "$(ROLE_ROOT)/scripts/sparknet-issue-triage.py" $(ARGS)
 
 review-agents: ## Review EVENT, or emit a trust transition (TRUST_NODE= LEVEL= REASON=)
 	@$(PY) "$(VAULT_ROOT)/services/sparknet-review-agents.py" --event "$(EVENT)" \

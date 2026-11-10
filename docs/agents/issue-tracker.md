@@ -23,8 +23,8 @@ The Master listener is `services/sparknet-peer-intake.py`:
   is a JSON object `{node_id: public_key_b64}` the operator creates from each
   peer's node public key. The key binds the signer; the registry entry binds the
   overlay address and the `issue-report` capability.
-- Store: `/mnt/log/sparknet-issues.jsonl`, append-only; triage state under the
-  Master state directory.
+- Store: `/mnt/log/sparknet-issues.jsonl`, append-only; triage history is
+  `<state-dir>/issues/triage.jsonl`, with `triage.json` derived from it.
 
 The Master records and tracks. It never executes an issue as a command, never
 installs it into a vault and never serves it as knowledge.
@@ -33,4 +33,14 @@ installs it into a vault and never serves it as knowledge.
 
 The five labels are `needs-triage`, `needs-info`, `ready-for-agent`,
 `ready-for-human` and `wontfix`. See `triage-labels.md`. The Master console
-exposes the recorded issues at `GET /api/issues` and the Issues tab.
+exposes the recorded issues at `GET /api/issues` and the Issues tab, read-only.
+A local triage transition is written with:
+
+```sh
+python3 scripts/sparknet-issue-triage.py \
+  --node-id sparknet-node-0002 --issue-id fix-token \
+  --status triaged --label ready-for-agent --note "reproduced"
+```
+
+The command appends to `triage.jsonl` and refreshes the derived `triage.json`.
+It does not sign, grant authority or send anything to a peer.
