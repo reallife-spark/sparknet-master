@@ -1,7 +1,7 @@
 ---
 title: sparknet master-node Plan
 updated: 2026-11-10
-current: 28
+current: done
 ---
 
 # sparknet master-node — Active Plan
@@ -265,7 +265,7 @@ current: 28
 
 ## Step 28 — Understand-Anything + issue intake (master half)
 
-- [ ] **Step 28** — Add the Master half of the Step 91 integration. Opened ahead
+- [x] **Step 28** — Add the Master half of the Step 91 integration. Opened ahead
   of the queued Step 27 by operator direction on 2026-11-09; Step 27 remains
   queued and is not cancelled.
   - [x] **28A — Skills and tracker.** Load the nine `/understand*` skills, the
@@ -289,14 +289,12 @@ current: 28
     refusal, replay refusal, digest mismatch and redaction refusal are covered
     by tests; live peer delivery is `DoD: confirm: user`.
 
-  - **Status 2026-11-09 — Master half implemented.** The Master catalog no
-    longer shadows the 80-skill base suite (1614 role-local), the local tracker
-    and docs are in place, `POST /api/v1/issues` verifies the signature,
-    overlay fingerprint, capability, digest, expiry and replay and appends to
-    the issue store, and the console exposes the issues read-only. Fabric 93B
-    adds the append-only triage writer and derived view. `make ci`,
-    `make -C master-node test` and `make bundle-verify ROLE=master` are green.
-    Live peer delivery is `DoD: confirm: user`.
+  - **Status 2026-11-10 — COMPLETE, including live intake.** The Master at
+    `agx64` received the peer's signed `live-step91-issue` over `10.100.0.1:8090`,
+    recorded it in `/mnt/log/sparknet-issues.jsonl`, and the read-only Issues
+    tab showed it. The local triage CLI closed it `done`/`wontfix`. The Master
+    code is `8580214`; the current master bundle rebuilt and verified. No
+    services outside the delivered intake/triage/browser leg are claimed.
 
 ## Next
 

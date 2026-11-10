@@ -1,7 +1,7 @@
 {
   "schema": "sparknet-console/1",
   "role": "master",
-  "node": "agx32",
+  "node": "agx64",
   "title": "Sparknet Master",
   "menus": [
     "mesh",
