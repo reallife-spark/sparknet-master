@@ -202,38 +202,25 @@ class Intake:
             raise Refusal(403, "off_overlay", "source is not a registered peer")
         authz = load_authz()
         try:
-            if not authz.verify_signature(
+            accepted = authz.accept_entry(
+                entry,
                 self.registry.master_key,
-                str(entry.get("signature_b64") or ""),
-                authz.authorization_message(entry),
-            ):
-                raise Refusal(403, "unsigned-entry", "registry entry signature does not verify")
-        except Refusal:
-            raise
-        except Exception as exc:
-            raise Refusal(403, "unsigned-entry", f"registry entry is not verifiable: {exc}") from exc
-        if entry.get("revoked"):
-            raise Refusal(403, "revoked")
-        try:
-            issued = datetime.fromisoformat(str(entry.get("issued_at") or "").replace("Z", "+00:00"))
-            expires = datetime.fromisoformat(str(entry.get("expires_at") or "").replace("Z", "+00:00"))
-            if issued.tzinfo is None:
-                issued = issued.replace(tzinfo=timezone.utc)
-            if expires.tzinfo is None:
-                expires = expires.replace(tzinfo=timezone.utc)
-            now = _now()
-            if now < issued:
-                raise Refusal(403, "not_yet_valid")
-            if now >= expires:
-                raise Refusal(403, "expired")
-        except ValueError as exc:
+                now=_now(),
+                required_capability="model-uplift",
+            )
+        except authz.RegistryEntryError as exc:
+            if exc.code in (authz.REASON_REVOKED, authz.REASON_EXPIRED, authz.REASON_NOT_YET_VALID):
+                raise Refusal(403, exc.code) from exc
+            if exc.code == "capability_missing":
+                raise Refusal(403, "capability_missing", "model-uplift is not granted") from exc
+            if exc.code == authz.REASON_IDENTITY_MISMATCH:
+                raise Refusal(403, "wrong_peer", "registry identity does not match its fingerprint") from exc
+            if exc.code == authz.REASON_BAD_SIGNATURE:
+                raise Refusal(403, "unsigned-entry", "registry entry signature does not verify") from exc
             raise Refusal(403, "malformed", "registry entry has malformed validity") from exc
-        identity = entry.get("identity") if isinstance(entry.get("identity"), dict) else {}
+        identity = accepted.identity
         if str(identity.get("node_id") or "") != node_id:
             raise Refusal(403, "wrong_peer", "signature key does not match the overlay source")
-        capabilities = entry.get("capabilities") if isinstance(entry.get("capabilities"), list) else []
-        if "model-uplift" not in capabilities:
-            raise Refusal(403, "capability_missing", "model-uplift is not granted")
         key = self.keys.get(node_id)
         if key is None:
             raise Refusal(403, "no-key", "no pinned key for this node")

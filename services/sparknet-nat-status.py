@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import signal
 import subprocess
 import sys
@@ -20,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from sparknet_loader import load_by_path
+from sparknet_loader import load_shared
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = ROLE_ROOT.parent
@@ -34,15 +33,8 @@ READ_COMMANDS = {
 }
 
 
-def _load(name: str, path: Path) -> Any:
-    if name in sys.modules:
-        return sys.modules[name]
-    return load_by_path(name, path)
-
-
 def _load_http() -> Any:
-    path = Path(os.environ.get("SPARKNET_SHARED_DIR", "").strip() or FABRIC_ROOT / "shared")
-    return _load("sparknet_http_nat_status", path / "sparknet-http.py")
+    return load_shared("sparknet-http.py", "sparknet_http_nat_status")
 
 
 class NatError(Exception):

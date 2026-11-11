@@ -215,41 +215,29 @@ def load_registry(path: Path, *, now: datetime | None = None) -> dict[str, Any]:
         if not isinstance(entry, dict):
             raise SchedulerError("registry_entry_malformed")
         fingerprint = entry.get("fingerprint")
-        identity = entry.get("identity")
-        if not isinstance(fingerprint, str) or len(fingerprint) != 64:
-            raise SchedulerError("registry_fingerprint_malformed")
-        if not isinstance(identity, dict):
-            raise SchedulerError("registry_identity_malformed")
+        label = fingerprint[:12] if isinstance(fingerprint, str) else "?"
         try:
-            if authz.fingerprint(identity) != fingerprint:
-                raise SchedulerError("registry_identity_mismatch")
-        except SchedulerError:
-            raise
-        except Exception as exc:
-            raise SchedulerError("registry_identity_malformed") from exc
-        if not authz.verify_signature(
-            public_key, str(entry.get("signature_b64") or ""), authz.authorization_message(entry)
-        ):
-            raise SchedulerError(f"registry_bad_signature: {fingerprint[:12]}")
-        caps = entry.get("capabilities")
-        if not isinstance(caps, list):
-            raise SchedulerError("registry_capabilities_malformed")
-        unknown = [cap for cap in caps if cap not in authz.KNOWN_CAPABILITIES]
-        if unknown:
-            raise SchedulerError("registry_unknown_capability")
-        if entry.get("revoked"):
-            continue
-        expires = parse_ts(entry.get("expires_at"))
-        issued = parse_ts(entry.get("issued_at"))
-        if expires is not None and moment >= expires:
-            continue
-        if issued is not None and moment < issued - timedelta(seconds=ALLOWED_CLOCK_SKEW_SECONDS):
-            raise SchedulerError(f"registry_not_yet_valid: {fingerprint[:12]}")
+            accepted = authz.accept_entry(entry, public_key, now=moment)
+        except authz.RegistryEntryError as exc:
+            if exc.code in (authz.REASON_REVOKED, authz.REASON_EXPIRED):
+                continue
+            if exc.code == authz.REASON_NOT_YET_VALID:
+                raise SchedulerError(f"registry_not_yet_valid: {label}") from exc
+            if exc.code == authz.REASON_BAD_SIGNATURE:
+                raise SchedulerError(f"registry_bad_signature: {label}") from exc
+            if exc.code == authz.REASON_IDENTITY_MISMATCH:
+                raise SchedulerError("registry_identity_mismatch") from exc
+            if exc.code == authz.REASON_UNKNOWN_CAPABILITY:
+                raise SchedulerError("registry_unknown_capability") from exc
+            raise SchedulerError("registry_entry_malformed") from exc
+        identity = accepted.identity
+        fingerprint = accepted.fingerprint
+        caps = accepted.capabilities
         node_id = identity.get("node_id")
         key = identity.get("wireguard_public_key_b64")
         node_pubkey_b64 = entry.get("node_pubkey_b64")
         role = identity.get("role")
-        address = _bare(entry.get("overlay_ipv4") or identity.get("overlay_ipv4"))
+        address = _bare(accepted.overlay_ipv4)
         if not isinstance(node_id, str) or not node_id:
             raise SchedulerError("registry_node_id_missing")
         if not isinstance(key, str) or not key:

@@ -240,24 +240,22 @@ def _registered_fingerprint(registry: str | None, fingerprint: str) -> str:
     for entry in document.get("authorizations") or []:
         if not isinstance(entry, dict) or entry.get("fingerprint") != fingerprint:
             continue
-        if not authz_impl.verify_signature(
-            master_key, str(entry.get("signature_b64") or ""), authz_impl.authorization_message(entry)
-        ):
-            raise ValueError("registry entry signature does not verify")
-        if entry.get("revoked"):
-            raise ValueError("requesting peer is revoked")
         try:
-            issued = datetime.fromisoformat(str(entry.get("issued_at") or "").replace("Z", "+00:00"))
-            expires = datetime.fromisoformat(str(entry.get("expires_at") or "").replace("Z", "+00:00"))
-        except ValueError as exc:
+            accepted = authz_impl.accept_entry(
+                entry,
+                master_key,
+                now=now,
+                expected_fingerprint=fingerprint,
+            )
+        except authz_impl.RegistryEntryError as exc:
+            if exc.code in (authz_impl.REASON_EXPIRED, authz_impl.REASON_NOT_YET_VALID):
+                raise ValueError("requesting peer is outside its authorization window") from exc
+            if exc.code == authz_impl.REASON_BAD_SIGNATURE:
+                raise ValueError("registry entry signature does not verify") from exc
+            if exc.code == authz_impl.REASON_REVOKED:
+                raise ValueError("requesting peer is revoked") from exc
             raise ValueError("registry entry has malformed validity") from exc
-        if issued.tzinfo is None:
-            issued = issued.replace(tzinfo=timezone.utc)
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-        if now < issued or now >= expires:
-            raise ValueError("requesting peer is outside its authorization window")
-        return fingerprint
+        return accepted.fingerprint
     raise ValueError("requesting peer is not in the registry")
 
 

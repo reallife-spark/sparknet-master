@@ -29,7 +29,7 @@ from typing import Any
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROLE_ROOT.parent / "shared"))
-from sparknet_loader import load_by_path, load_shared  # noqa: E402 - import after the loader path shim
+from sparknet_loader import load_shared  # noqa: E402 - import after the loader path shim
 
 DEFAULT_REGISTRY = ROLE_ROOT / "manifests" / "node-authorizations.json"
 DEFAULT_DEADLINE_SECONDS = 2 * 60 * 60
@@ -41,7 +41,6 @@ def _load_authz() -> Any:
     return load_shared(
         "sparknet-authz.py",
         "sparknet_authz",
-        dirs=[ROLE_ROOT.parent / "shared"],
         error=RuntimeError,
         message="cannot locate sparknet-authz.py; share ratification refuses to reimplement grant verification",
     )
@@ -364,21 +363,8 @@ class SignerClient:
 # --- 4203 listener -----------------------------------------------------------
 
 
-def _shared_dir() -> Path:
-    explicit = os.environ.get("SPARKNET_SHARED_DIR", "").strip()
-    if explicit:
-        return Path(explicit)
-    for candidate in (ROLE_ROOT / "shared", ROLE_ROOT.parent / "shared"):
-        if (candidate / "sparknet-http.py").is_file():
-            return candidate
-    return ROLE_ROOT.parent / "shared"
-
-
 def _load_http() -> Any:
-    path = _shared_dir() / "sparknet-http.py"
-    if "sparknet_http_share_ratify" in sys.modules:
-        return sys.modules["sparknet_http_share_ratify"]
-    return load_by_path("sparknet_http_share_ratify", path)
+    return load_shared("sparknet-http.py", "sparknet_http_share_ratify")
 
 
 def _default_state_path() -> Path:

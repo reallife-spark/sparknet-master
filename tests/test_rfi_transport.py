@@ -1,6 +1,6 @@
 """Step 67D: the RFI inbox transport, end to end.
 
-The envelope tests (tests/test_contracts.py) and the install-rule tests
+The envelope tests (tests/contracts/test_rfi_answers.py) and the install-rule tests
 (tests/test_provenance.py) prove the *rule*; this suite proves the *channel*: an
 answer signed on the Master side is pushed over a real socket to the peer's own
 guard daemon (loaded by path), installed into ``01_Inbox/``, and recorded as an

@@ -33,7 +33,8 @@ ROLE_ROOT = Path(__file__).resolve().parent.parent
 # This service lives in master-node/services/, so it puts the fabric's shared/
 # on sys.path (the same directory its authz candidates resolve to) before
 # importing the fabric's single loader. These lines are deliberately the same
-# shape as every shared module; tests/test_contracts.py pins the pattern.
+# shape as every shared module; tests/contracts/test_shared_implementation.py
+# pins the pattern.
 sys.path.insert(0, str(ROLE_ROOT.parent / "shared"))
 from sparknet_loader import load_shared  # noqa: E402 - import after the loader path shim
 

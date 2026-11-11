@@ -67,7 +67,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from sparknet_loader import load_by_path
+from sparknet_loader import load_shared
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -163,28 +163,15 @@ class Target(NamedTuple):
 # --- loading the one implementation ------------------------------------------
 
 
-def _load(name: str, path: Path):
-    """Load a shared module by path, registering it in sys.modules first."""
-    return load_by_path(name, path)
-
-
-def _shared_dir() -> Path:
-    candidates = [
-        Path(os.environ["SPARKNET_SHARED_DIR"]) if os.environ.get("SPARKNET_SHARED_DIR") else None,
-        ROLE_ROOT.parent / "shared",
-        ROLE_ROOT / "shared",
-        Path("/srv/sparknet/shared"),
-    ]
-    for candidate in candidates:
-        if candidate and (candidate / "sparknet-authz.py").is_file():
-            return candidate.resolve()
-    raise ConsoleError("cannot find shared/; set SPARKNET_SHARED_DIR")
-
-
 def load_authz(shared_dir: Path | None = None):
     """Load the one signed-authorization implementation, never a copy of it."""
-    shared = shared_dir or _shared_dir()
-    return _load("sparknet_console_authz", shared / "sparknet-authz.py")
+    return load_shared(
+        "sparknet-authz.py",
+        "sparknet_console_authz",
+        dirs=[shared_dir] if shared_dir else None,
+        error=ConsoleError,
+        message="cannot find shared/sparknet-authz.py; the console carries no authorization implementation",
+    )
 
 
 # --- composing a request ------------------------------------------------------
@@ -430,8 +417,13 @@ def load_notify(shared_dir: Path | None = None):
     """The one node-local notification implementation, never a copy of it."""
     global _notify_module
     if _notify_module is None:
-        shared = shared_dir or _shared_dir()
-        _notify_module = _load("sparknet_console_notify", shared / "sparknet-notify.py")
+        _notify_module = load_shared(
+            "sparknet-notify.py",
+            "sparknet_console_notify",
+            dirs=[shared_dir] if shared_dir else None,
+            error=ConsoleError,
+            message="cannot find shared/sparknet-notify.py; the console carries no notification implementation",
+        )
     return _notify_module
 
 

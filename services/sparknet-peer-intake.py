@@ -135,6 +135,18 @@ def _load_authz() -> Any:
 
 authz = _load_authz()
 
+#: The shared acceptance codes mapped to this listener's stable public reasons.
+_ENTRY_REFUSALS = {
+    authz.REASON_MALFORMED: "malformed",
+    authz.REASON_REVOKED: "revoked",
+    authz.REASON_EXPIRED: "expired",
+    authz.REASON_NOT_YET_VALID: "not_yet_valid",
+    authz.REASON_IDENTITY_MISMATCH: "unsigned_entry",
+    authz.REASON_BAD_SIGNATURE: "unsigned_entry",
+    authz.REASON_UNKNOWN_CAPABILITY: "malformed",
+    "capability_missing": "capability_missing",
+}
+
 
 def _load_http() -> Any:
     if "sparknet_intake_http" in sys.modules:
@@ -253,14 +265,19 @@ class PeerDirectory:
             return None, "off_overlay"
         if self._master_key is not None:
             try:
-                if not authz.verify_signature(
+                accepted = authz.accept_entry(
+                    entry,
                     self._master_key,
-                    str(entry.get("signature_b64") or ""),
-                    authz.authorization_message(entry),
-                ):
-                    return None, "unsigned_entry"
-            except Exception:
-                return None, "unsigned_entry"
+                    required_capability=capability,
+                )
+            except authz.RegistryEntryError as exc:
+                return None, _ENTRY_REFUSALS.get(exc.code, "malformed")
+            return accepted.fingerprint, ""
+
+        # A directory built without a Master key is a local test fixture, not a
+        # production registry. It cannot verify a signature or an identity, so
+        # it keeps the structural/lifetime/capability checks only; the verified
+        # path above is the one every real registry uses.
         if entry.get("revoked"):
             return None, "revoked"
         try:

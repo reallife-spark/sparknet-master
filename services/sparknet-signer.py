@@ -88,7 +88,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from sparknet_loader import load_by_path
+from sparknet_loader import load_by_path, load_shared
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -189,23 +189,22 @@ def _load(name: str, path: Path):
     return load_by_path(name, path)
 
 
-def _shared_dir() -> Path:
-    candidates = [
-        Path(os.environ["SPARKNET_SHARED_DIR"]) if os.environ.get("SPARKNET_SHARED_DIR") else None,
-        ROLE_ROOT.parent / "shared",
-        ROLE_ROOT / "shared",
-        Path("/srv/sparknet/shared"),
-    ]
-    for candidate in candidates:
-        if candidate and (candidate / "sparknet-authz.py").is_file():
-            return candidate.resolve()
-    raise SignerError("cannot find shared/; set SPARKNET_SHARED_DIR")
-
-
 def load_modules(shared_dir: Path | None = None) -> tuple[Any, Any]:
-    shared = shared_dir or _shared_dir()
-    authz = _load("sparknet_signer_authz", shared / "sparknet-authz.py")
-    consensus = _load("sparknet_signer_consensus", shared / "sparknet-consensus.py")
+    dirs = [shared_dir] if shared_dir else None
+    authz = load_shared(
+        "sparknet-authz.py",
+        "sparknet_signer_authz",
+        dirs=dirs,
+        error=SignerError,
+        message="cannot find shared/sparknet-authz.py; the signer carries no authorization implementation",
+    )
+    consensus = load_shared(
+        "sparknet-consensus.py",
+        "sparknet_signer_consensus",
+        dirs=dirs,
+        error=SignerError,
+        message="cannot find shared/sparknet-consensus.py; the signer carries no consensus implementation",
+    )
     return authz, consensus
 
 

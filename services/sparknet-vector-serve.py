@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from sparknet_loader import load_by_path
+from sparknet_loader import load_by_path, load_shared
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 FABRIC_ROOT = ROLE_ROOT.parent
@@ -49,18 +49,8 @@ def _load(name: str, path: Path) -> Any:
     return load_by_path(name, path)
 
 
-def _shared_dir() -> Path:
-    explicit = os.environ.get("SPARKNET_SHARED_DIR", "").strip()
-    if explicit:
-        return Path(explicit)
-    for candidate in (ROLE_ROOT / "shared", FABRIC_ROOT / "shared"):
-        if (candidate / "sparknet-http.py").is_file():
-            return candidate
-    return FABRIC_ROOT / "shared"
-
-
 def _load_http() -> Any:
-    return _load("sparknet_http_vector", _shared_dir() / "sparknet-http.py")
+    return load_shared("sparknet-http.py", "sparknet_http_vector")
 
 
 def _load_vector() -> Any:
