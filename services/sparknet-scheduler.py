@@ -55,6 +55,7 @@ AUTHZ_PATH = REPO_ROOT / "shared" / "sparknet-authz.py"
 IDLE_PATH = REPO_ROOT / "shared" / "sparknet-idle.py"
 CLUSTER_PATH = REPO_ROOT / "shared" / "sparknet-cluster.py"
 NOCTURNAL_PATH = REPO_ROOT / "shared" / "sparknet-nocturnal.py"
+SKILL_EVAL_PATH = REPO_ROOT / "shared" / "sparknet-skill-eval.py"
 
 SCHEMA_VERSION = "sparknet-nocturnal/1"
 STATE_SCHEMA_VERSION = "sparknet-nocturnal-state/1"
@@ -106,6 +107,10 @@ def _cluster() -> Any:
 
 def _nocturnal() -> Any:
     return _load_module(NOCTURNAL_PATH, "sparknet_scheduler_nocturnal")
+
+
+def _skill_eval() -> Any:
+    return _load_module(SKILL_EVAL_PATH, "sparknet_scheduler_skill_eval")
 
 
 def _now_iso(now: datetime | None = None) -> str:
@@ -994,6 +999,45 @@ def _dispatch(args: argparse.Namespace, now: datetime) -> int:
         manifests.append(manifest)
         result_docs.append(payload)
     reduced = cluster.reduce_results(collected, [item["subtask_id"] for item in built["subtasks"]])
+    network_evals = None
+    modes = {str(item.get("mode") or "model") for item in built["subtasks"]}
+    if modes == {"skill-eval"}:
+        skill_eval = _skill_eval()
+        eval_ids = {item["subtask_id"] for item in built["subtasks"]}
+        records: list[dict[str, Any]] = []
+        invalid = 0
+        for result in collected:
+            if result.get("subtask_id") not in eval_ids:
+                continue
+            try:
+                record = json.loads(str(result.get("output") or ""))
+                skill_eval.validate_record(record)
+            except (json.JSONDecodeError, skill_eval.SkillEvalError, TypeError):
+                invalid += 1
+                continue
+            records.append(
+                {
+                    "node": result.get("participant_node_id"),
+                    "eval_id": record.get("eval_id"),
+                    "skill": (record.get("skill") or {}).get("name"),
+                    "verdict": record.get("verdict"),
+                    "subject": record.get("subject"),
+                    "created_at": record.get("created_at"),
+                }
+            )
+        counts = {"total": len(records), "pass": 0, "warn": 0, "fail": 0, "invalid": invalid}
+        for item in records:
+            if item["verdict"] in ("pass", "warn", "fail"):
+                counts[item["verdict"]] += 1
+        records.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        network_evals = {
+            "schema": "sparknet-network-skill-eval/1",
+            "lease_id": lease_id,
+            "job_id": signed_job["job_id"],
+            "records": records,
+            "counts": counts,
+        }
+        reduced["network_evals"] = network_evals
     aggregate_manifest = {
         "schema_version": _nocturnal().MANIFEST_SCHEMA,
         "lease_id": lease_id,
@@ -1034,6 +1078,7 @@ def _dispatch(args: argparse.Namespace, now: datetime) -> int:
             "lease_id": lease_id,
             "job_id": signed_job["job_id"],
             "coverage": reduced["coverage"],
+            "network_evals": network_evals,
             "artifact": artifact,
         }
     )

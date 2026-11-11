@@ -686,13 +686,15 @@ def test_dispatch_verifies_results_and_writes_the_aggregate(tmp_path: Path, monk
         def sign_job(self, payload):
             return {**payload, "signature_b64": "fake"}
 
+    active = {"result": signed_result, "manifest": signed_manifest}
+
     def fake_http(url, payload=None, *, timeout=30.0):
         if url.endswith("/v1/cluster/submit"):
             return 200, {"ok": True, "job_id": job["job_id"], "status": "accepted"}
         if "/status/" in url:
             return 200, {"ok": True, "status": "completed"}
         if "/result/" in url:
-            return 200, {"ok": True, "result": {"results": [signed_result], "manifest": signed_manifest}}
+            return 200, {"ok": True, "result": {"results": [active["result"]], "manifest": active["manifest"]}}
         raise AssertionError(url)
 
     monkeypatch.setattr(scheduler, "SchedulerSigner", FakeSigner)
@@ -724,3 +726,85 @@ def test_dispatch_verifies_results_and_writes_the_aggregate(tmp_path: Path, monk
     aggregate = master_root / "01_Inbox" / "nocturnal" / "lease-1" / job["job_id"] / "aggregate.json"
     assert aggregate.is_file()
     assert json.loads(aggregate.read_text())["coverage"]["missing"] == []
+
+    # --- skill-eval job: the network summary is derived from signed outputs ---
+    skill_eval = scheduler._skill_eval()
+    record = skill_eval.make_record(
+        eval_id="review-eval-1",
+        skill={"name": "code-review", "origin": "mattpocock"},
+        subject={"kind": "self-improve-candidate", "ref": "fixture:defect-shell-true"},
+        verdict="fail",
+        findings=[{"severity": "block", "rule": "security.shell-true", "message": "shell invocation"}],
+        evaluator={"kind": "harness", "id": "sparknet-skill-eval"},
+        created_at="2026-11-04T02:30:00Z",
+    )
+
+    def eval_result(job_id: str, output: str) -> tuple[dict, dict]:
+        result = {
+            "schema_version": nocturnal.RESULT_SCHEMA,
+            "lease_id": "lease-1",
+            "job_id": job_id,
+            "subtask_id": "s1",
+            "participant_node_id": peer_id,
+            "instruction_sha256": hashlib.sha256(b"evaluate").hexdigest(),
+            "output_sha256": hashlib.sha256(output.encode()).hexdigest(),
+            "model": "skill-eval-rules/1",
+            "started_at": "2026-11-04T02:30:00Z",
+            "ended_at": "2026-11-04T02:30:01Z",
+            "coverage": {"answered": ["s1"], "missing": []},
+            "output": output,
+        }
+        signed = nocturnal.sign_result(result, peer_private_b64)
+        digest = hashlib.sha256((json.dumps(signed, sort_keys=True, indent=2) + "\n").encode()).hexdigest()
+        manifest = {
+            "schema_version": nocturnal.MANIFEST_SCHEMA,
+            "lease_id": "lease-1",
+            "job_id": job_id,
+            "participant_node_id": peer_id,
+            "subtasks": [{"subtask_id": "s1", "result_sha256": digest, "answered": True}],
+            "model": "skill-eval-rules/1",
+            "corpus_digest": None,
+            "started_at": result["started_at"],
+            "ended_at": result["ended_at"],
+            "coverage": result["coverage"],
+            "created_at": "2026-11-04T02:30:02Z",
+        }
+        return signed, nocturnal.sign_manifest(manifest, peer_private_b64)
+
+    eval_job = {
+        **job,
+        "job_id": "job-eval-1",
+        "prompt": "evaluate the fixture",
+        "subtasks": [
+            {
+                "node_id": peer_id,
+                "subtask_id": "s1",
+                "instruction": "evaluate",
+                "context_refs": ["fixture:defect-shell-true"],
+                "mode": "skill-eval",
+            }
+        ],
+    }
+    eval_job_path = tmp_path / "job-eval.json"
+    eval_job_path.write_text(json.dumps(eval_job))
+    active["result"], active["manifest"] = eval_result("job-eval-1", json.dumps(record, sort_keys=True, indent=2))
+    args.job = str(eval_job_path)
+    assert scheduler._dispatch(args, now) == 0
+    eval_aggregate = master_root / "01_Inbox" / "nocturnal" / "lease-1" / "job-eval-1" / "aggregate.json"
+    summary = json.loads(eval_aggregate.read_text())["network_evals"]
+    assert summary["counts"] == {"total": 1, "pass": 0, "warn": 0, "fail": 1, "invalid": 0}
+    assert summary["records"][0]["node"] == peer_id
+    assert summary["records"][0]["verdict"] == "fail"
+    assert summary["records"][0]["subject"]["ref"] == "fixture:defect-shell-true"
+
+    tampered = dict(record)
+    tampered["verdict"] = "warn"
+    bad_job = {**eval_job, "job_id": "job-eval-bad"}
+    bad_path = tmp_path / "job-eval-bad.json"
+    bad_path.write_text(json.dumps(bad_job))
+    active["result"], active["manifest"] = eval_result("job-eval-bad", json.dumps(tampered, sort_keys=True, indent=2))
+    args.job = str(bad_path)
+    assert scheduler._dispatch(args, now) == 0
+    bad_aggregate = master_root / "01_Inbox" / "nocturnal" / "lease-1" / "job-eval-bad" / "aggregate.json"
+    bad_summary = json.loads(bad_aggregate.read_text())["network_evals"]
+    assert bad_summary["counts"] == {"total": 0, "pass": 0, "warn": 0, "fail": 0, "invalid": 1}
