@@ -7,6 +7,9 @@
     "INTENT.md",
     "00_System/alpha-admin.md"
   ],
+  "skills": {
+    "paths": ["../.opencode/skills"]
+  },
   "references": {
     "knowledge": {
       "path": ".",
@@ -14,6 +17,44 @@
     }
   },
   "permission": {
+    "skill": {
+      "*": "deny",
+      "wiki-ingest": "allow",
+      "wiki-query": "allow",
+      "wiki-capture": "allow",
+      "wiki-lint": "allow",
+      "wiki-status": "allow",
+      "wiki-update": "allow",
+      "wiki-digest": "allow",
+      "wiki-dedup": "allow",
+      "wiki-synthesize": "allow",
+      "wiki-research": "allow",
+      "wiki-context-pack": "allow",
+      "wiki-export": "allow",
+      "cross-linker": "allow",
+      "tag-taxonomy": "allow",
+      "llm-wiki": "allow",
+      "domain-modeling": "allow",
+      "code-review": "allow",
+      "tdd": "allow",
+      "diagnosing-bugs": "allow",
+      "implement": "allow",
+      "implement-spec": "allow",
+      "pr": "allow",
+      "triage": "allow",
+      "research": "allow",
+      "understand": "allow",
+      "skill-template": "allow",
+      "internal-comms": "allow",
+      "secure-code-guardian": "allow",
+      "security-reviewer": "allow",
+      "the-fool": "allow",
+      "prompt-engineer": "allow",
+      "cli-developer": "allow",
+      "architecture-designer": "allow",
+      "code-documenter": "allow",
+      "api-designer": "allow"
+    },
     "edit": {
       "*": "allow",
       "../peer-node/**": "deny",
@@ -29,6 +70,18 @@
     }
   },
   "mcp": {
+    "sparknet-skills": {
+      "type": "local",
+      "command": [
+        "python3",
+        "../shared/sparknet-skills-mcp.py",
+        "--catalog",
+        "../.opencode/skills/.catalog.json",
+        "--catalog",
+        ".opencode/skills/.catalog.json"
+      ],
+      "enabled": true
+    },
     "sparknet-memory": {
       "type": "local",
       "command": [

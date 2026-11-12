@@ -36,7 +36,11 @@
       }
     }
   },
+  "mcp": {
+    "sparknet-skills": ${SKILLS_MCP}
+  },
   "permission": {
+    "skill": ${SKILLS_PERMISSION},
     "edit": {
       "*": "allow"
     },
