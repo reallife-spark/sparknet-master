@@ -352,3 +352,23 @@ def test_the_unit_binds_the_overlay_only() -> None:
     assert "0.0.0.0" not in unit
     assert "sparknet-peer-intake.py" in unit
     assert "--request-dir" in unit
+
+
+def test_eval_store_is_append_only_and_idempotent_by_report_id(tmp_path: Path) -> None:
+    report = {
+        "schema": "sparknet-eval-report/1",
+        "report_id": "a" * 64,
+        "node_id": "peer-1",
+        "peer_fingerprint": PEER_FP,
+        "records": [{"schema": "sparknet-skill-eval/1"}],
+        "records_sha256": "b" * 64,
+        "generated_at": "2026-11-12T00:00:00Z",
+        "issued_at": "2026-11-12T00:00:00Z",
+        "expires_at": "2026-11-12T00:05:00Z",
+        "nonce": "c" * 32,
+    }
+    store = intake.EvalStore(tmp_path / "evals.jsonl")
+    assert store.record(report, source="127.0.0.1") == "recorded"
+    assert store.record(report, source="127.0.0.1") == "duplicate"
+    reloaded = intake.EvalStore(tmp_path / "evals.jsonl")
+    assert ("peer-1", "a" * 64) in reloaded.seen

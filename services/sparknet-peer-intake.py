@@ -90,7 +90,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from sparknet_loader import load_by_path
+from sparknet_loader import load_by_path, load_shared
 
 ROLE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = ROLE_ROOT.parent
@@ -118,6 +118,7 @@ REFUSAL_STATUS = {
     "expired": 403,
     "not_yet_valid": 403,
     "replayed_nonce": 409,
+    "replayed": 409,
     "digest_mismatch": 400,
     "secret_shaped": 400,
     "unknown_key": 403,
@@ -543,6 +544,108 @@ def _issues(
     return 200, {"status": outcome, "issue_id": report["issue_id"], "node_id": node_id}
 
 
+DEFAULT_EVAL_STORE = Path("/mnt/log/sparknet-evals.jsonl")
+EVAL_PATH = "/api/v1/evals"
+
+
+class EvalStore:
+    """Append-only Master audit sink for signed eval reports."""
+
+    def __init__(self, path: Path | str) -> None:
+        self.path = Path(path)
+        self.seen: set[tuple[str, str]] = set()
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.is_file():
+            return
+        try:
+            lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            report = row.get("report") if isinstance(row, dict) else None
+            if not isinstance(report, dict):
+                continue
+            key = (str(report.get("node_id") or ""), str(report.get("report_id") or ""))
+            if all(key):
+                self.seen.add(key)
+
+    def record(self, report: dict[str, Any], *, source: str) -> str:
+        key = (str(report["node_id"]), str(report["report_id"]))
+        if key in self.seen:
+            return "duplicate"
+        row = {
+            "received_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "received_from": source,
+            "report": report,
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        with contextlib.suppress(OSError):
+            os.chmod(self.path, 0o600)
+        self.seen.add(key)
+        return "recorded"
+
+
+def _evals(directory: Any, keys: dict[str, Any], store: EvalStore, request: Any) -> tuple[int, dict[str, Any]]:
+    """Accept one signed audit report. It carries no authority and no knowledge."""
+    client = request.client[0]
+    fingerprint, reason = directory.attribute(client, capability="telemetry")
+    if fingerprint is None:
+        return REFUSAL_STATUS.get(reason, 403), {"error": reason}
+    report = request.json
+    if not isinstance(report, dict):
+        return 400, {"error": "malformed"}
+    node_id = str(report.get("node_id") or "")
+    entry = directory.entry_for(client)
+    if entry is None:
+        return 403, {"error": "off_overlay"}
+    entry_identity = entry.get("identity") if isinstance(entry.get("identity"), dict) else {}
+    entry_node = str(entry_identity.get("node_id") or entry.get("node_id") or "")
+    if not node_id or entry_node != node_id:
+        return 403, {"error": "wrong_peer"}
+    key = keys.get(node_id)
+    if key is None:
+        return 403, {"error": "unknown_key"}
+    timestamp = request.headers.get("X-Sparknet-Timestamp", "")
+    signature = request.headers.get("X-Sparknet-Signature", "")
+    if not timestamp or not signature:
+        return 401, {"error": "unsigned"}
+    try:
+        message = http.request_message("POST", EVAL_PATH, request.body, timestamp)
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return 400, {"error": "malformed"}
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    if abs((datetime.now(timezone.utc) - parsed).total_seconds()) > ISSUE_MAX_AGE_SECONDS:
+        return 401, {"error": "stale"}
+    try:
+        signed = authz.verify_signature(key, signature, message)
+    except Exception:
+        signed = False
+    if not signed:
+        return 401, {"error": "bad_signature"}
+    eval_report = load_shared("sparknet-eval-report.py", "sparknet_eval_report_intake")
+    ok, verify_reason = eval_report.validate_report(report, expected_fingerprint=fingerprint, seen_nonces=store.seen)
+    if not ok:
+        return REFUSAL_STATUS.get(verify_reason, 400), {"error": verify_reason}
+    try:
+        outcome = store.record(report, source=client)
+    except OSError as exc:
+        print(f"peer-intake: eval store write failed: {exc}", file=sys.stderr)
+        return 503, {"error": "store_unavailable"}
+    return 200, {"status": outcome, "report_id": report["report_id"], "node_id": node_id}
+
+
 def build_listener(
     *,
     bind: str,
@@ -554,12 +657,14 @@ def build_listener(
     request_queue: RequestQueue | None = None,
     issue_keys: dict[str, Any] | None = None,
     issue_store: IssueStore | None = None,
+    eval_store: EvalStore | None = None,
 ) -> Any:
     """Build the route-table listener; the caller owns start/stop."""
     queue = request_queue if request_queue is not None else RequestQueue(request_dir or default_request_dir())
     seen = seen_nonces if seen_nonces is not None else spool_nonces(spool)
     keys = dict(issue_keys or {})
     store = issue_store if issue_store is not None else IssueStore(default_issue_store())
+    evals = eval_store if eval_store is not None else EvalStore(DEFAULT_EVAL_STORE)
 
     def refusal(exc: BaseException) -> tuple[int, dict[str, Any]]:
         status = getattr(exc, "status", 500)
@@ -586,6 +691,12 @@ def build_listener(
                 method="POST",
                 max_body=MAX_BODY,
             ),
+            http.Route(
+                EVAL_PATH,
+                lambda request: _evals(directory, keys, evals, request),
+                method="POST",
+                max_body=MAX_BODY,
+            ),
         ],
         name="peer-intake",
         bind=bind,
@@ -605,6 +716,7 @@ def serve(
     request_queue: RequestQueue | None = None,
     issue_keys: dict[str, Any] | None = None,
     issue_store: IssueStore | None = None,
+    eval_store: EvalStore | None = None,
 ) -> Any:
     if bind != DEFAULT_BIND and bind not in {"127.0.0.1", "::1"}:
         raise IntakeError("refuse to bind a non-overlay address (the intake is overlay-only)")
@@ -618,6 +730,7 @@ def serve(
         request_queue=request_queue,
         issue_keys=issue_keys,
         issue_store=issue_store,
+        eval_store=eval_store,
     )
     print(f"peer-intake: listening on {bind}:{port}", file=sys.stderr)
     return listener
@@ -640,6 +753,7 @@ def main(argv: list[str] | None = None) -> int:
         help="trusted node public key for the signed issue route (repeatable)",
     )
     parser.add_argument("--issue-store", default=os.environ.get("SPARKNET_ISSUE_STORE", ""))
+    parser.add_argument("--eval-store", default=os.environ.get("SPARKNET_EVAL_STORE", str(DEFAULT_EVAL_STORE)))
     parser.add_argument(
         "--issue-keyring",
         default=os.environ.get("SPARKNET_ISSUE_KEYRING", ""),
@@ -650,6 +764,7 @@ def main(argv: list[str] | None = None) -> int:
     spool = Path(args.spool) if args.spool else default_spool()
     request_dir = Path(args.request_dir) if args.request_dir else default_request_dir()
     issue_store = Path(args.issue_store) if args.issue_store else default_issue_store()
+    eval_store = Path(args.eval_store) if args.eval_store else DEFAULT_EVAL_STORE
 
     issue_keys: dict[str, Any] = {}
     if args.issue_keyring:
@@ -684,9 +799,10 @@ def main(argv: list[str] | None = None) -> int:
                     "spool": str(spool),
                     "request_dir": str(request_dir),
                     "issue_store": str(issue_store),
+                    "eval_store": str(eval_store),
                     "issue_keys": sorted(issue_keys),
                     "issue_keyring": args.issue_keyring,
-                    "routes": ["/api/v1/telemetry", "/api/v1/rfi-request", "/api/v1/issues"],
+                    "routes": ["/api/v1/telemetry", "/api/v1/rfi-request", "/api/v1/issues", EVAL_PATH],
                     "authority": "none — records evidence and work items; never signs/grants/revokes",
                 },
                 indent=2,
@@ -711,6 +827,7 @@ def main(argv: list[str] | None = None) -> int:
             request_dir=request_dir,
             issue_keys=issue_keys,
             issue_store=IssueStore(issue_store),
+            eval_store=EvalStore(eval_store),
         )
         listener.wait()
     except (IntakeError, OSError) as exc:
