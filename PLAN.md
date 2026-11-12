@@ -1,7 +1,7 @@
 ---
 title: sparknet master-node Plan
 updated: 2026-11-10
-current: done
+current: 9
 ---
 
 # sparknet master-node — Active Plan
@@ -62,6 +62,10 @@ current: done
   - **Deferred 2026-11-06:** 9G is parked until after Step 26. Do not arm or
     run the nocturnal window during the role inversion; the Master host and
     scheduler state move.
+  - **Status 2026-11-12:** the code remains released. The next eligible window
+    is 2026-11-13 02:00–05:00 local; the target hosts still need the released
+    bundle/image verified before arming. 9G stays open until that dated live
+    observation exists.
 
 ## Step 10 — Share ratification service
 
@@ -79,6 +83,9 @@ current: done
   - **Status**: code complete 2026-10-29; multi-key listener and durable human
     queue added 2026-10-31. Tested; no unit enabled on the pair. Closed by
     operator scope decision 2026-11-04.
+  - **Status 2026-11-12:** the three-node loopback share rehearsal passes
+    10/10, including the signed 4203 queue and lift. A live 4203 round trip
+    still needs a third host and a three-entry registry; it is not claimed.
 
 ## Step 11 — Evidence capture and review repository
 
