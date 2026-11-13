@@ -1,7 +1,7 @@
 ---
 title: sparknet master-node Plan
-updated: 2026-11-10
-current: 9
+updated: 2026-11-13
+current: done
 ---
 
 # sparknet master-node — Active Plan
@@ -47,10 +47,10 @@ current: 9
     repository and no automatic promotion.
   - [x] **9F — optional timer.** `sparknet-nocturnal-probe.service`/`.timer`
     runs `scheduler status --notify` and has no path to `plan` or `arm`.
-  - [ ] **9G — live deploy.** The signed dispatcher, placement, peer execution,
-    reduce and artifact path are implemented and locally tested. A two-node
-    live window on agx64/agx32 with an operator present is still
-    `DoD: confirm: user`; the scheduler only permits 02:00–05:00 local.
+  - [x] **9G — live deploy.** The signed dispatcher, placement, peer
+    execution, reduce and artifact path are implemented, locally tested and
+    live on agx64/agx32; the scheduler permits 02:00–05:00 local. See the
+    2026-11-13 status for the window evidence.
   - **DoD**: 9E writes and commits signed artifacts with explicit coverage and
     no auto-promotion; 9F cannot arm; 9G is the live two-node window.
   - **Status 2026-11-04:** 9E/9F and the 9G code path are implemented and
@@ -66,6 +66,19 @@ current: 9
     is 2026-11-13 02:00–05:00 local; the target hosts still need the released
     bundle/image verified before arming. 9G stays open until that dated live
     observation exists.
+  - **Status 2026-11-13 — COMPLETE (live window).** Three plans at 02:00,
+    02:05 and 02:10 local produced three all-idle local, observer and peer
+    samples; `plan-ce065bc3f69236d4` armed as `lease-c417555d896f7134`
+    (operator `raxxar`, reason "9G closure + eval loop"). The signed
+    `skill-eval` job `job-eval-window-20261113T011032Z` returned
+    `coverage.answered ["s1"]`, `network_evals fail:1 invalid:0 total:1`, and
+    wrote the Master aggregate under
+    `master-node/01_Inbox/nocturnal/lease-c417.../job-eval.../` plus the
+    peer's signed result/manifest under `peer-node/01_Inbox/nocturnal/.../`.
+    `abort` closed the lease at 02:10 with reason "9G window complete"; no
+    promotion, no authority. The real vLLM model job is not claimed: the model
+    upstream is down; the deterministic eval path is the live DoD. Evidence:
+    `/home/raxxar/nocturnal-window-2026-11-13/` on agx64.
 
 ## Step 10 — Share ratification service
 
