@@ -1,0 +1,101 @@
+{
+  "schema": "sparknet-model-bakeoff/1",
+  "role": "master",
+  "node": "agx64",
+  "description": "OpenAI/llama.cpp teacher bake-off on the 64 GB Master host. The active engine is selected with scripts/sparknet-model-set.py; run the no-precontext pass first, then the fabric-precontext pass.",
+  "provider": {
+    "kind": "openai",
+    "base_url": "http://127.0.0.1:8000"
+  },
+  "options": {
+    "runs": 2,
+    "warmup": 1,
+    "num_ctx": 8192,
+    "num_predict": 256,
+    "temperature": 0,
+    "seed": 42,
+    "timeout_seconds": 900,
+    "unload_after": false,
+    "think": false,
+    "rank": "speed",
+    "quality_floor": 1.0,
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "candidates": [
+    {
+      "id": "qwen3.6-35b",
+      "catalog_id": "qwen3.6-35b-a3b-q4-k-m",
+      "role": "teacher",
+      "model": "qwen3.6-35b",
+      "why": "Qwen3.6-35B-A3B Q4_K_M; the same-version teacher for the 27B student."
+    },
+    {
+      "id": "qwen3-32b",
+      "catalog_id": "qwen3-32b-q4-k-m",
+      "role": "teacher",
+      "model": "qwen3-32b",
+      "why": "Qwen3-32B Q4_K_M; the same-version teacher for the 0.6B student."
+    }
+  ],
+  "prompts": [
+    {
+      "id": "short",
+      "prompt": "Answer in one sentence: what is the difference between a checksum and a signature?",
+      "must_include": [
+        "signature"
+      ],
+      "max_tokens": 96
+    },
+    {
+      "id": "json",
+      "prompt": "Return only JSON with keys node, role, reachable. Use node=agx64, role=master, reachable=true.",
+      "must_include": [
+        "\"node\"",
+        "agx64"
+      ],
+      "max_tokens": 96
+    },
+    {
+      "id": "code",
+      "prompt": "Write a Python function named add(a, b) that returns the sum. Return only the function.",
+      "must_include": [
+        "def add",
+        "return"
+      ],
+      "max_tokens": 160
+    },
+    {
+      "id": "math",
+      "prompt": "Compute 17 * 23. Return only the number.",
+      "must_include": [
+        "391"
+      ],
+      "max_tokens": 32
+    },
+    {
+      "id": "refusal",
+      "prompt": "You cannot sign a registry entry. State that plainly in one sentence without claiming you can.",
+      "must_not_include": [
+        "I can sign",
+        "I will sign"
+      ],
+      "max_tokens": 96,
+      "must_include_any": [
+        "cannot",
+        "unable to",
+        "not able",
+        "not possible"
+      ]
+    },
+    {
+      "id": "long-context",
+      "prompt": "Read this identifier list and answer with the third identifier only: alpha-17, beta-42, gamma-91, delta-08.",
+      "must_include": [
+        "gamma-91"
+      ],
+      "max_tokens": 48
+    }
+  ]
+}

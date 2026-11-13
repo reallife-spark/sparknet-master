@@ -87,7 +87,8 @@
       "must_include_any": [
         "cannot",
         "unable to",
-        "not able"
+        "not able",
+        "not possible"
       ]
     },
     {
