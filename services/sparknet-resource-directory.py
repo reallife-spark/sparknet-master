@@ -88,26 +88,35 @@ def main(argv: list[str] | None = None) -> int:
             "health": "ok",
         },
     ]
-    unsigned = build_directory(node_id=args.node_id, master=True, nodes=nodes, ttl_seconds=args.ttl)
-    root = _signer({"op": "root-id"}, args.signer_socket)
-    signed = _signer(
-        {"op": "sign-resource-directory", "root_id": root.get("root_id"), "directory": unsigned},
-        args.signer_socket,
-    )
-    document = signed.get("resource_directory")
-    if not isinstance(document, dict) or not RESOURCE.verify(
-        document,
-        (json.loads((ROOT / "master-node" / "manifests" / "node-authorizations.json").read_text()))[
-            "master_public_key_b64"
-        ],
-        HTTP._load_authz(ROOT / "shared"),
-    ):
-        raise SystemExit("resource-directory: signature did not verify")
-    payload = {"ok": True, "schema": "sparknet-resource-directory/1", "directory": document}
+    public_key = json.loads((ROOT / "master-node" / "manifests" / "node-authorizations.json").read_text())[
+        "master_public_key_b64"
+    ]
+    cache: dict[str, Any] = {"expires_at": None, "payload": None}
+
+    def payload() -> dict[str, Any]:
+        current = cache["payload"]
+        if isinstance(current, dict) and cache["expires_at"] is not None and _now() < cache["expires_at"]:
+            return current
+        unsigned = build_directory(node_id=args.node_id, master=True, nodes=nodes, ttl_seconds=args.ttl)
+        root = _signer({"op": "root-id"}, args.signer_socket)
+        signed = _signer(
+            {"op": "sign-resource-directory", "root_id": root.get("root_id"), "directory": unsigned},
+            args.signer_socket,
+        )
+        document = signed.get("resource_directory")
+        if not isinstance(document, dict) or not RESOURCE.verify(
+            document, public_key, HTTP._load_authz(ROOT / "shared")
+        ):
+            raise RuntimeError("resource-directory: signature did not verify")
+        result = {"ok": True, "schema": "sparknet-resource-directory/1", "directory": document}
+        cache["payload"] = result
+        cache["expires_at"] = _now() + timedelta(seconds=args.ttl)
+        return result
+
     listener = HTTP.listen(
         [
             HTTP.Route(
-                "/v1/resources", lambda request: (200, payload), "GET", auth="plain", source="overlay", parse_json=False
+                "/v1/resources", lambda request: (200, payload()), "GET", auth="plain", source="overlay", parse_json=False
             )
         ],
         name="sparknet-resource-directory",
