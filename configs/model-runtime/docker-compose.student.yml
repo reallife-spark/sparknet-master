@@ -1,0 +1,44 @@
+# The Master's student model runtime. It is on-demand: the Master has no chat
+# model until a student is trained and approved, and training must stop this
+# profile before it takes the exclusive lease.
+#
+# The model file is supplied by scripts/sparknet-model-runtime.py from the pull
+# manifest. It is mounted read-only; the student container holds no key, no
+# signer socket and no vault.
+name: sparknet-student
+
+services:
+  student:
+    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggerganov/llama.cpp:server-cuda}
+    container_name: sparknet-student
+    profiles: ["student"]
+    restart: "no"
+    network_mode: host
+    ipc: host
+    command:
+      - --model
+      - ${STUDENT_MODEL_FILE:?set STUDENT_MODEL_FILE from the model manifest}
+      - --ctx-size
+      - ${STUDENT_CTX_SIZE:-32768}
+      - --n-gpu-layers
+      - ${STUDENT_N_GPU_LAYERS:-999}
+      - --host
+      - 127.0.0.1
+      - --port
+      - "8101"
+      - --jinja
+      - --flash-attn
+    environment:
+      LLAMA_ARG_HOST: 127.0.0.1
+      LLAMA_ARG_PORT: "8101"
+    volumes:
+      - ${SPARKNET_MODEL_STORE:-/mnt/ai/models}:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    security_opt:
+      - no-new-privileges:true

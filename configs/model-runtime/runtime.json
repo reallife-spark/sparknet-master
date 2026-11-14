@@ -1,45 +1,45 @@
 {
   "schema": "sparknet-model-runtime/1",
   "role": "master",
-  "node": "agx64",
-  "description": "The Master's on-demand teacher runtime. The 64 GB Master host holds the teacher; the peer holds the student. A teacher is a warm lease, not a per-request cold start, and the Master does not use it to run user chat.",
+  "node": "agx32",
+  "description": "The Master's on-demand student runtime. The 32 GB Master host holds the student; the 64 GB peer holds the teacher. A student is a warm lease, not a per-request cold start.",
   "defaults": {
-    "idle_stop_minutes": 45,
-    "min_free_gb": 40,
+    "idle_stop_minutes": 30,
+    "min_free_gb": 8,
     "health_timeout_seconds": 180,
     "memory_safety_gb": 4
   },
   "profiles": {
-    "teacher": {
-      "model_id": "qwen3-30b-a3b-2507-q4-k-m",
-      "compose_file": "master-node/configs/model-runtime/docker-compose.teacher.yml",
-      "project": "sparknet-teacher",
-      "profile": "teacher",
+    "student": {
+      "model_id": "qwen3-4b-2507-q4-k-m",
+      "compose_file": "peer-node/configs/model-runtime/docker-compose.student.yml",
+      "project": "sparknet-student",
+      "profile": "student",
       "services": [
-        "teacher"
+        "student"
       ],
-      "model_env": "TEACHER_MODEL_FILE",
-      "memory_gb": 35,
-      "health_url": "http://127.0.0.1:8100/health",
-      "idle_stop_minutes": 45,
-      "conflicts": [
-        "teacher-reference"
-      ]
-    },
-    "teacher-reference": {
-      "model_id": "qwen3.6-35b-a3b-q4-k-m",
-      "compose_file": "master-node/configs/model-runtime/docker-compose.teacher.yml",
-      "project": "sparknet-teacher",
-      "profile": "teacher",
-      "services": [
-        "teacher"
-      ],
-      "model_env": "TEACHER_MODEL_FILE",
-      "memory_gb": 23,
-      "health_url": "http://127.0.0.1:8100/health",
+      "model_env": "STUDENT_MODEL_FILE",
+      "memory_gb": 27,
+      "health_url": "http://127.0.0.1:8101/health",
       "idle_stop_minutes": 30,
       "conflicts": [
-        "teacher"
+        "student-large"
+      ]
+    },
+    "student-large": {
+      "model_id": "qwen3.6-27b-q4-k-m",
+      "compose_file": "peer-node/configs/model-runtime/docker-compose.student.yml",
+      "project": "sparknet-student",
+      "profile": "student",
+      "services": [
+        "student"
+      ],
+      "model_env": "STUDENT_MODEL_FILE",
+      "memory_gb": 21,
+      "health_url": "http://127.0.0.1:8101/health",
+      "idle_stop_minutes": 20,
+      "conflicts": [
+        "student"
       ]
     }
   }
