@@ -136,6 +136,12 @@ def verify_chain(ledger: dict[str, Any], expected_pubkey_b64: str | None = None)
     blocks = ledger.get("blocks")
     if not isinstance(blocks, list):
         return False, "ledger has no blocks array"
+    if not blocks:
+        # A freshly provisioned Master has a valid, empty genesis ledger. It has
+        # no operational-key block yet, but it is not a broken chain; refusing it
+        # makes the signer's ledger dependency unstartable before the first
+        # signature is ever issued. The first block is still verified normally.
+        return True, "empty ledger (genesis state)"
     previous = str(ledger.get("genesis_hash", ""))
     seen_expected = False
     for index, block in enumerate(blocks):
