@@ -635,6 +635,30 @@ class Signer:
             "signature_b64": signature_b64,
         }
 
+    def _prepare_resource_directory(self, op: str, directory: dict[str, Any]) -> SignerOutcome:
+        """Sign metadata, never knowledge or authority."""
+        resource = load_shared(
+            "sparknet-resource-directory.py",
+            "sparknet_signer_resource_directory",
+            dirs=[ROLE_ROOT.parent / "shared", ROLE_ROOT / "shared"],
+            error=SignerError,
+            message="cannot locate the shared resource-directory canonicalisation",
+        )
+        unsigned = {k: v for k, v in directory.items() if k != "signature_b64"}
+        try:
+            message = resource.canonical(unsigned)
+        except Exception as exc:
+            raise SignerRefusal(f"resource directory is not canonicalisable: {exc}") from exc
+        signature_b64 = self.authz.sign_bytes(self.key, message)
+        subject = str(unsigned["directory_id"])
+        return SignerOutcome(
+            subject=subject,
+            ledger_event="signature_issued",
+            ledger_payload=self._signature_issued(op, subject, signature_b64),
+            response_key="resource_directory",
+            artifact={**unsigned, "signature_b64": signature_b64},
+        )
+
     def _prepare_registry_entry(self, op: str, entry: dict[str, Any]) -> SignerOutcome:
         unsigned = {k: v for k, v in entry.items() if k != "signature_b64"}
         required = ("fingerprint", "identity", "capabilities", "issued_at", "expires_at")
@@ -947,6 +971,14 @@ class Signer:
 #: order; each row names the request field, response key and ledger event while
 #: the named prepare method owns the security-sensitive policy.
 SIGNER_OPERATIONS: dict[str, SignerOperation] = {
+    "sign-resource-directory": SignerOperation(
+        name="sign-resource-directory",
+        request_field="directory",
+        request_phrase="a 'directory' object",
+        response_key="resource_directory",
+        ledger_event="signature_issued",
+        prepare=Signer._prepare_resource_directory,
+    ),
     "sign-registry-entry": SignerOperation(
         name="sign-registry-entry",
         request_field="entry",

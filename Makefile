@@ -39,7 +39,7 @@ REASON ?=
         env-show parity ledger evidence-capture review-agents keygen keys-check units units-check step89-admin \
         signer signer-unit reflex-unit peer-intake-unit rfi-responder-unit wg-observer-unit nocturnal-probe-unit console vault-health vault-heal \
         provenance-verify user-init provenance-append ingest precommit shims-check context-pack context-check governance-check \
-        bundle wiki-preflight wiki-status wiki-lint wiki-query skills-sync skills-check vector-reindex vector-serve uplift-intake uplift-intake-unit uplift-intake-check distill distill-doctor distill-trainer-help distill-dataset distill-run distill-status file-share-serve nat-status-serve share-ratify-unit share-ratify-serve share-ratify-list share-ratify-approve share-ratify-refuse issue-triage clean
+        bundle wiki-preflight wiki-status wiki-lint wiki-query skills-sync skills-check vector-reindex vector-serve uplift-intake uplift-intake-unit uplift-intake-check distill distill-doctor distill-trainer-help distill-dataset distill-run distill-status resource-directory file-share-serve nat-status-serve share-ratify-unit share-ratify-serve share-ratify-list share-ratify-approve share-ratify-refuse issue-triage clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -110,6 +110,9 @@ distill-dataset: ## Build a same-family distillation dataset from uplifted trace
 
 distill-status: ## Write the sanitized distillation status snapshot for the WebUI
 	@$(PY) "$(ROLE_ROOT)/services/sparknet-distill-status.py" --config "$(DISTILL_CONFIG)" --state "$(DISTILL_STATE)" --out "$(ROLE_ROOT)/.state/webui/distill-status.json" --share-out /srv/sparknet/share/learning/status.json
+
+resource-directory: ## Serve the Master-signed model/memory endpoint directory
+	@$(PY) "$(ROLE_ROOT)/services/sparknet-resource-directory.py"
 
 distill: ## Show the run scaffold (operator-triggered; no training by default)
 	@$(PY) "$(ROLE_ROOT)/services/sparknet-distill.py" run --config "$(DISTILL_CONFIG)" --state "$(DISTILL_STATE)" --uplift "$(UPLIFT_STATE)"

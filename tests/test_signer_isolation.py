@@ -1934,6 +1934,14 @@ def _distillation_run() -> dict:
 def _valid_operation_requests() -> dict[str, dict]:
     """One valid request body per catalog row, used by the table-driven test."""
     return {
+        "sign-resource-directory": {
+            "directory": {
+                "directory_id": "dir-test",
+                "issued_at": "2026-11-14T00:00:00Z",
+                "expires_at": "2026-11-15T00:00:00Z",
+                "nodes": [],
+            }
+        },
         "sign-registry-entry": {"entry": _entry()},
         "sign-registry-publication": {"publication": _publication()},
         "sign-guard-approval": {"approval": _guard_approval()},
