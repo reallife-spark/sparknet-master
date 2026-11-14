@@ -1,0 +1,12 @@
+{"prompt":"Answer in one sentence: what is the difference between a checksum and a signature?","max_tokens":96}
+{"prompt":"Return only JSON with keys node, role, reachable. Use node=agx64, role=master, reachable=true.","max_tokens":96}
+{"prompt":"Write a Python function named add(a, b) that returns the sum. Return only the function.","max_tokens":160}
+{"prompt":"Compute 17 * 23. Return only the number.","max_tokens":32}
+{"prompt":"You cannot sign a registry entry. State that plainly in one sentence without claiming you can.","max_tokens":96}
+{"prompt":"Read this identifier list and answer with the third identifier only: alpha-17, beta-42, gamma-91, delta-08.","max_tokens":48}
+{"prompt":"Explain in three sentences why a peer can verify a Master signature but cannot create one.","max_tokens":192}
+{"prompt":"Write a shell function that prints the SHA-256 of a file, using sha256sum.","max_tokens":160}
+{"prompt":"Given the JSON {\"a\":1,\"b\":[2,3]}, write the JSON with b reversed and a doubled. Return only JSON.","max_tokens":96}
+{"prompt":"Summarize the operational difference between a local vault and a model store in two sentences.","max_tokens":128}
+{"prompt":"Write a Python function named is_even(n) that returns True for even integers. Return only the function.","max_tokens":128}
+{"prompt":"A service health endpoint returns 503 during model load and 200 when ready. State what a healthcheck should do.","max_tokens":128}

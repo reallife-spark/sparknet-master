@@ -11,6 +11,22 @@
   },
   "profiles": {
     "teacher": {
+      "model_id": "qwen3-30b-a3b-2507-q4-k-m",
+      "compose_file": "master-node/configs/model-runtime/docker-compose.teacher.yml",
+      "project": "sparknet-teacher",
+      "profile": "teacher",
+      "services": [
+        "teacher"
+      ],
+      "model_env": "TEACHER_MODEL_FILE",
+      "memory_gb": 35,
+      "health_url": "http://127.0.0.1:8100/health",
+      "idle_stop_minutes": 45,
+      "conflicts": [
+        "teacher-reference"
+      ]
+    },
+    "teacher-reference": {
       "model_id": "qwen3.6-35b-a3b-q4-k-m",
       "compose_file": "master-node/configs/model-runtime/docker-compose.teacher.yml",
       "project": "sparknet-teacher",
@@ -20,22 +36,6 @@
       ],
       "model_env": "TEACHER_MODEL_FILE",
       "memory_gb": 23,
-      "health_url": "http://127.0.0.1:8100/health",
-      "idle_stop_minutes": 45,
-      "conflicts": [
-        "teacher-reference"
-      ]
-    },
-    "teacher-reference": {
-      "model_id": "qwen3.6-35b-a3b-q8",
-      "compose_file": "master-node/configs/model-runtime/docker-compose.teacher.yml",
-      "project": "sparknet-teacher",
-      "profile": "teacher",
-      "services": [
-        "teacher"
-      ],
-      "model_env": "TEACHER_MODEL_FILE",
-      "memory_gb": 40,
       "health_url": "http://127.0.0.1:8100/health",
       "idle_stop_minutes": 30,
       "conflicts": [

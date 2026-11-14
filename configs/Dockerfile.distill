@@ -1,9 +1,35 @@
 # The training image for a same-family distillation run.
 #
-# It starts from the node image (torch + transformers already present on the
-# Xavier) and adds PEFT. The runtime allow-list of the services is untouched:
-# this image is used only by an operator-triggered run, never by a listener.
-FROM sparknet-agx-node:dev
-RUN pip install --no-cache-dir 'peft==0.13.2' 'datasets==3.1.0' 'accelerate==0.26.1'
-COPY train_lora.py /opt/sparknet/train_lora.py
+# It is a separate L4T PyTorch image, not the Step 108 node image: the node
+# image no longer carries torch/transformers after the vLLM retirement.
+FROM nvcr.io/nvidia/l4t-pytorch:r35.2.1-pth2.0-py3@sha256:545a0f62fb4a5fd2d8c511134f6c55d451ae1565075dcc67123b0c422a469472
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    HF_HOME=/root/.cache/huggingface \
+    TOKENIZERS_PARALLELISM=false
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates git build-essential cmake python3-pip python3-dev libcurl4-openssl-dev \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 -m pip install --no-cache-dir --upgrade pip \
+ && python3 -m pip install --no-cache-dir \
+      'transformers==4.37.2' 'peft==0.13.2' 'datasets==3.1.0' 'accelerate==0.26.1' \
+      sentencepiece protobuf gguf
+
+# CPU llama.cpp tools for the merge/convert/quantize leg. The trainer itself
+# uses the CUDA torch from the base; the quantizer does not need CUDA.
+RUN git clone --depth 1 --branch b9016 https://github.com/ggml-org/llama.cpp.git /opt/llama.cpp \
+ && cmake -S /opt/llama.cpp -B /opt/llama.cpp/build \
+      -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DLLAMA_CURL=OFF \
+      -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF \
+ && cmake --build /opt/llama.cpp/build --parallel "$(nproc)" --target llama-quantize \
+ && test -x /opt/llama.cpp/build/bin/llama-quantize \
+ && test -f /opt/llama.cpp/convert_hf_to_gguf.py
+
+COPY master-node/configs/train_lora.py /opt/sparknet/train_lora.py
+COPY scripts/sparknet-distill-export.py /opt/sparknet/sparknet-distill-export.py
+COPY scripts/sparknet-sign-artifact.py /opt/sparknet/sparknet-sign-artifact.py
+
+WORKDIR /work
 ENTRYPOINT ["/usr/bin/python3", "/opt/sparknet/train_lora.py"]

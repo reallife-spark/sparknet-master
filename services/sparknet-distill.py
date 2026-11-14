@@ -290,6 +290,8 @@ def run(config: dict[str, Any], *, uplift: Path, state: Path, execute: bool, sig
     if not student:
         raise SystemExit("distill: student_base_model is required to bind the trainer to the signed run")
     env["SPARKNET_DISTILL_STUDENT"] = student
+    env["SPARKNET_DISTILL_STATE"] = str(state)
+    env["SPARKNET_DISTILL_MAX_LEN"] = str(config.get("sequence_length") or 16384)
     result = subprocess.run(shlex.split(trainer), env=env, cwd=str(root))
     artifact = root / "artifact"
     artifact_sha = ""

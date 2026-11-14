@@ -56,6 +56,7 @@ DEFAULT_STATE = Path(os.environ.get("SPARKNET_UPLIFT_STATE", "/srv/sparknet/upli
 DEFAULT_REGISTRY = ROLE_ROOT / "manifests" / "node-authorizations.json"
 MAX_JSON = 8 * 1024 * 1024
 MAX_ARTIFACT = 1024 * 1024 * 1024
+MAX_STUDENT_ARTIFACT = 4 * 1024 * 1024 * 1024
 REPLAY_WINDOW = 300
 INVENTORY_NAMESPACE = uuid.UUID("c3a7bb6e-4f6d-5d8e-9b8a-2b4f2f5b9c11")
 QDRANT_COLLECTION = "uplift-inventory"
@@ -360,6 +361,9 @@ class Intake:
         if kind == "snapshot":
             directory = self.state / "snapshots" / node_id / safe
             suffix = ".snapshot"
+        elif kind == "student":
+            directory = self.state / "student" / node_id
+            suffix = ".gguf"
         else:
             directory = self.state / "kv" / node_id
             suffix = ".safetensors.gz" if str(manifest.get("compression", "gzip")) == "gzip" else ".safetensors.zst"
@@ -473,6 +477,13 @@ def build_listener(intake: Intake, *, bind: str, port: int) -> Any:
                 method="POST",
                 parse_json=False,
                 max_body=MAX_ARTIFACT,
+            ),
+            http.Route(
+                "/api/v1/student-artifact",
+                lambda request: _artifact(intake, request, "student"),
+                method="POST",
+                parse_json=False,
+                max_body=MAX_STUDENT_ARTIFACT,
             ),
         ],
         name="uplift-intake",

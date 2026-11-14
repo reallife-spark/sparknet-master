@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import tarfile
 from pathlib import Path
 
 import torch
@@ -28,7 +27,7 @@ from transformers import (
 STUDENT = os.environ.get("SPARKNET_DISTILL_STUDENT", "Qwen/Qwen2.5-1.5B-Instruct")
 DATASET = Path(os.environ["SPARKNET_DISTILL_DATASET"])
 RUN = os.environ.get("SPARKNET_DISTILL_RUN", "run")
-MAX_LEN = int(os.environ.get("SPARKNET_DISTILL_MAX_LEN", "1024"))
+MAX_LEN = int(os.environ.get("SPARKNET_DISTILL_MAX_LEN", "16384"))
 
 
 def _rows(path: Path) -> list[dict]:
@@ -50,7 +49,7 @@ def main() -> int:
 
     train = train.map(encode, remove_columns=train.column_names)
     model = AutoModelForCausalLM.from_pretrained(
-        STUDENT, torch_dtype=torch.float32, device_map={"": 0}, trust_remote_code=True
+        STUDENT, torch_dtype=torch.float16, device_map={"": 0}, trust_remote_code=True
     )
     model.gradient_checkpointing_enable()
     model = get_peft_model(
@@ -70,7 +69,8 @@ def main() -> int:
         gradient_accumulation_steps=4,
         num_train_epochs=1,
         learning_rate=2e-4,
-        fp16=False,
+        fp16=True,
+        optim="adafactor",
         logging_steps=1,
         save_strategy="no",
         report_to=[],
@@ -82,8 +82,6 @@ def main() -> int:
         data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
     ).train()
     model.save_pretrained("adapter")
-    with tarfile.open("artifact", "w:gz") as tar:
-        tar.add("adapter", arcname="adapter")
 
     # A small, honest held-out signal: token overlap between the student and
     # the teacher response on the validation split. It is not a benchmark; it
