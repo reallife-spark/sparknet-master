@@ -24,10 +24,12 @@ from transformers import (
     TrainingArguments,
 )
 
-STUDENT = os.environ.get("SPARKNET_DISTILL_STUDENT", "Qwen/Qwen2.5-1.5B-Instruct")
+STUDENT = os.environ.get("SPARKNET_DISTILL_STUDENT", "Qwen/Qwen3-4B-Instruct-2507")
 DATASET = Path(os.environ["SPARKNET_DISTILL_DATASET"])
 RUN = os.environ.get("SPARKNET_DISTILL_RUN", "run")
 MAX_LEN = int(os.environ.get("SPARKNET_DISTILL_MAX_LEN", "16384"))
+DTYPE = os.environ.get("SPARKNET_DISTILL_DTYPE", "bf16").strip().lower()
+USE_4BIT = os.environ.get("SPARKNET_DISTILL_4BIT", "1").strip() != "0"
 
 
 def _rows(path: Path) -> list[dict]:
@@ -48,9 +50,32 @@ def main() -> int:
         return encoded
 
     train = train.map(encode, remove_columns=train.column_names)
-    model = AutoModelForCausalLM.from_pretrained(
-        STUDENT, torch_dtype=torch.float16, device_map={"": 0}, trust_remote_code=True
-    )
+    compute_dtype = torch.bfloat16 if DTYPE == "bf16" else torch.float16
+    if USE_4BIT:
+        from peft import prepare_model_for_kbit_training
+        from transformers import BitsAndBytesConfig
+
+        model = AutoModelForCausalLM.from_pretrained(
+            STUDENT,
+            quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=compute_dtype,
+                bnb_4bit_use_double_quant=True,
+            ),
+            device_map={"": 0},
+            trust_remote_code=True,
+            attn_implementation="sdpa",
+        )
+        model = prepare_model_for_kbit_training(model)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            STUDENT,
+            torch_dtype=compute_dtype,
+            device_map={"": 0},
+            trust_remote_code=True,
+            attn_implementation="sdpa",
+        )
     model.gradient_checkpointing_enable()
     model = get_peft_model(
         model,
@@ -69,8 +94,9 @@ def main() -> int:
         gradient_accumulation_steps=4,
         num_train_epochs=1,
         learning_rate=2e-4,
-        fp16=True,
-        optim="adafactor",
+        fp16=DTYPE != "bf16",
+        bf16=DTYPE == "bf16",
+        optim="paged_adamw_8bit" if USE_4BIT else "adafactor",
         logging_steps=1,
         save_strategy="no",
         report_to=[],

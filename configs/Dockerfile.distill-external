@@ -1,0 +1,47 @@
+# External GPU trainer for a Qwen3 same-family distillation run.
+#
+# This image is x86_64/CUDA, not an L4T node image. Build and run it on the
+# operator-approved external GPU host. The agx32 L4T r35 image cannot load
+# Qwen3 (Python 3.8 / transformers 4.37.2); this image is the supported path.
+#
+# The build context is a sparknet-distill-bundle directory, not the fabric root:
+#   docker build -f Dockerfile -t sparknet-distill-external .
+FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-devel
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    HF_HOME=/root/.cache/huggingface \
+    TOKENIZERS_PARALLELISM=false \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates git build-essential cmake libcurl4-openssl-dev \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 -m pip install --no-cache-dir --upgrade pip \
+ && python3 -m pip install --no-cache-dir \
+      'transformers==4.51.3' \
+      'peft>=0.17,<0.18' \
+      'datasets>=3.6,<4' \
+      'accelerate>=1.6,<2' \
+      'bitsandbytes>=0.45,<0.46' \
+      'sentencepiece>=0.2,<0.3' \
+      'protobuf>=5.29,<6' \
+      'gguf>=0.16,<0.17' \
+      'safetensors>=0.5,<0.6'
+
+# CPU llama.cpp tools for the merge/convert/quantize leg. The trainer uses
+# CUDA; the quantizer does not.
+RUN git clone --depth 1 --branch b9016 https://github.com/ggml-org/llama.cpp.git /opt/llama.cpp \
+ && cmake -S /opt/llama.cpp -B /opt/llama.cpp/build \
+      -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DLLAMA_CURL=OFF \
+      -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF \
+ && cmake --build /opt/llama.cpp/build --parallel "$(nproc)" --target llama-quantize \
+ && test -x /opt/llama.cpp/build/bin/llama-quantize \
+ && test -f /opt/llama.cpp/convert_hf_to_gguf.py
+
+COPY train_lora.py /opt/sparknet/train_lora.py
+COPY sparknet-distill-export.py /opt/sparknet/sparknet-distill-export.py
+COPY distill-external-entrypoint.sh /opt/sparknet/entrypoint.sh
+
+WORKDIR /work
+ENTRYPOINT ["/bin/bash", "/opt/sparknet/entrypoint.sh"]
