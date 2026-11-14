@@ -116,7 +116,12 @@ def main(argv: list[str] | None = None) -> int:
     listener = HTTP.listen(
         [
             HTTP.Route(
-                "/v1/resources", lambda request: (200, payload()), "GET", auth="plain", source="overlay", parse_json=False
+                "/v1/resources",
+                lambda request: (200, payload()),
+                "GET",
+                auth="plain",
+                source="overlay",
+                parse_json=False,
             )
         ],
         name="sparknet-resource-directory",
