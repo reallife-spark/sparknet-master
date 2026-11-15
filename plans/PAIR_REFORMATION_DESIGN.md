@@ -1,7 +1,8 @@
 # Re-formation reference design — informed by NVIDIA PAIR's membership model
 
 Status: **policy B adopted — fully built (fabric `PLAN.md` Step 21, schema
-1.2).** Both halves are now in `shared/sparknet-consensus.py`,
+1.2), and the 2 -> 3 admission half is built in Step 112 (schema 1.3).** Both
+re-formation halves are now in `shared/sparknet-consensus.py`,
 `shared/sparknet-election.py` and the signer. The Q2 half — the orderings:
 `previous_root_id` and `epoch` in the signed root fields, the `unchained_root`
 refusal on the trust path, `verify_chain(roots)` for an offline peer, and the
@@ -116,8 +117,10 @@ already has a pull-shaped channel: the peer↔peer share handoff (runbook Phase
 ## What this deliberately does not do
 
 - **No fourth membership.** The chain proves descent; it does not change the
-  2..3 bound in `cluster_trust_root.members`. A chained root that *adds* a
-  member is still refused (`unchained_root`): adding is the join ceremony.
+  2..3 bound in `cluster_trust_root.members`. A chained root may add exactly one
+  member to a pair through the schema 1.3 admission ceremony; adding a fourth,
+  adding two, or combining an add with a drop or a Master change is still
+  refused.
 - **No authority widening.** A re-formed root still requires unanimity among
   the members of the *new* root, and a node removed by re-formation cannot
   re-form its way back in on its own (the removed member's cluster key is not in
@@ -125,6 +128,19 @@ already has a pull-shaped channel: the peer↔peer share handoff (runbook Phase
 - **No silent eviction.** A reduction is refused unless its dropped set is
   exactly the set its removal proofs evidence, so a colluding majority cannot
   vanish an honest node without leaving evidence a pure verifier can check.
+
+## Admission (Step 112)
+
+The join half is now concrete: a 2-member parent may form a chained 3-member
+child that keeps the Master, `master_pubkey` and the existing members' four
+signed fields unchanged; the one new member must use distinct identity material;
+the operational key must be distinct from every member cluster key; no removal
+proof is attached; and all three members co-sign. `verify_root(child,
+trust=parent)` implements the rule, and `ElectionExchange --admission` verifies
+it at the seal. The new member and the existing peer adopt the child as members
+(`--as-member`), while the Master flips normally. This is the answer to PAIR's
+"endorsed by the previous epoch's members" that was missing from the original
+re-formation design.
 
 ## Suggested decision path
 

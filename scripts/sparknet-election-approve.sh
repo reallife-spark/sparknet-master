@@ -23,12 +23,15 @@ IDENTITY="$ROLE_ROOT/manifests/master-identity.json"
 ROOT_DOC="$ROLE_ROOT/manifests/cluster-trust-root.json"
 KEY_DIR="${SPARKNET_KEY_DIR:-$SPARKNET_STATE_DIR/keys}"
 WAIT="${SPARKNET_ELECTION_WAIT:-30}"
+MEMBERS=""
+ADMISSION=0
 
 usage() {
   cat <<USAGE
 usage: sparknet-election-approve.sh --expect-master <node-id> [--url <url>]
                                     [--identity <file>] [--root-doc <file>]
                                     [--key-dir <dir>] [--wait-seconds <n>]
+                                    [--members <roster>] [--admission]
 
 Runs the member ceremony (bid -> vote -> co-sign) and installs the formed
 cluster trust root: --identity role flips to master when this node is the one
@@ -40,6 +43,8 @@ the root names; the signed root is written into --root-doc.
   --root-doc       $ROLE_ROOT/manifests/cluster-trust-root.json
   --key-dir        \$SPARKNET_KEY_DIR or \$SPARKNET_STATE_DIR/keys
   --wait-seconds   \$SPARKNET_ELECTION_WAIT or 30
+  --members        out-of-band roster; required for --admission
+  --admission      run a 2 -> 3 join member ceremony
 USAGE
 }
 
@@ -51,6 +56,8 @@ while [ $# -gt 0 ]; do
     --root-doc) ROOT_DOC="$2"; shift 2 ;;
     --key-dir) KEY_DIR="$2"; shift 2 ;;
     --wait-seconds) WAIT="$2"; shift 2 ;;
+    --members) MEMBERS="$2"; shift 2 ;;
+    --admission) ADMISSION=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage; exit 1 ;;
   esac
@@ -66,6 +73,11 @@ fi
 
 [ -f "$IDENTITY" ] || { echo "identity not found: $IDENTITY" >&2; exit 1; }
 
+if [ "$ADMISSION" = 1 ] && [ -z "$MEMBERS" ]; then
+  echo "--admission requires --members with the out-of-band roster" >&2
+  exit 1
+fi
+
 PY="${PY:-$FABRIC_ROOT/.venv/bin/python}"
 [ -x "$PY" ] || PY="$(command -v python3)"
 ELECTION="$FABRIC_ROOT/shared/sparknet-election.py"
@@ -78,10 +90,15 @@ if [ ! -f "$KEY_DIR/cluster.ed25519" ]; then
   exit 1
 fi
 
-exec "$PY" "$ELECTION" --shared-dir "$FABRIC_ROOT/shared" member \
-  --url "$URL" \
-  --candidate "$EXPECT" \
-  --identity "$IDENTITY" \
-  --root-doc "$ROOT_DOC" \
-  --key-dir "$KEY_DIR" \
+ARGS=(
+  --url "$URL"
+  --candidate "$EXPECT"
+  --identity "$IDENTITY"
+  --root-doc "$ROOT_DOC"
+  --key-dir "$KEY_DIR"
   --wait-seconds "$WAIT"
+)
+if [ -n "$MEMBERS" ]; then ARGS+=(--members "$MEMBERS"); fi
+if [ "$ADMISSION" = 1 ]; then ARGS+=(--admission); fi
+
+exec "$PY" "$ELECTION" --shared-dir "$FABRIC_ROOT/shared" member "${ARGS[@]}"

@@ -633,11 +633,13 @@ share-ratify: ## Share ratification scaffold
 # The master-node half of the member ceremony plus installation: co-signs the
 # formed root and writes it into manifests/cluster-trust-root.json.
 # EXPECT=<node-id> is the candidate this node voted for — required, never guessed.
-election-approve: ## install the formed trust root (EXPECT=<node> URL= IDENTITY= ROOT_DOC= KEY_DIR= WAIT=)
+election-approve: ## install the formed trust root (EXPECT=<node> URL= IDENTITY= ROOT_DOC= KEY_DIR= WAIT= MEMBERS= ADMISSION=1)
 	@$(ROLE_ROOT)/scripts/sparknet-election-approve.sh \
 	  $(if $(EXPECT),--expect-master "$(EXPECT)") \
 	  $(if $(URL),--url "$(URL)") \
 	  $(if $(IDENTITY),--identity "$(IDENTITY)") \
 	  $(if $(ROOT_DOC),--root-doc "$(ROOT_DOC)") \
 	  $(if $(KEY_DIR),--key-dir "$(KEY_DIR)") \
-	  $(if $(WAIT),--wait-seconds "$(WAIT)")
+	  $(if $(WAIT),--wait-seconds "$(WAIT)") \
+	  $(if $(MEMBERS),--members "$(MEMBERS)") \
+	  $(if $(ADMISSION),--admission)
