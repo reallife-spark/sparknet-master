@@ -17,6 +17,19 @@ services:
       ENABLE_LOGIN_FORM: "true"
       ENABLE_PASSWORD_AUTH: "true"
 
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:${OAUTH2_PROXY_TAG:-v7.6.0}
+    container_name: sparknet-oauth2-proxy
+    restart: unless-stopped
+    # Loopback only. The admin ingress calls /oauth2/auth; nginx proxies the
+    # browser through /oauth2/start and /oauth2/callback.
+    network_mode: host
+    env_file:
+      - ${SPARKNET_OAUTH2_ENV:?set SPARKNET_OAUTH2_ENV to the node oauth2 env file}
+    volumes:
+      - ${SPARKNET_IDENTITY_DIR:?set SPARKNET_IDENTITY_DIR to the node identity dir}:/etc/sparknet/identity:ro
+
   sso-nginx:
     image: nginx:1.27-alpine
     container_name: sparknet-master-sso-nginx
@@ -36,3 +49,4 @@ services:
       - ${SPARKNET_IDENTITY_DIR:?set SPARKNET_IDENTITY_DIR to the Master identity dir}:/etc/sparknet/identity:ro
     depends_on:
       - open-webui
+      - oauth2-proxy

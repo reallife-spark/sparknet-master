@@ -37,7 +37,7 @@ REASON ?=
 
 .PHONY: help env-init validate status plan test test-all lint spec-check \
         env-show parity ledger evidence-capture review-agents keygen keys-check units units-check step89-admin \
-        signer signer-unit reflex-unit peer-intake-unit rfi-responder-unit wg-observer-unit nocturnal-probe-unit console admin-proxy admin-proxy-unit identity-render offline-review vault-health vault-heal \
+        signer signer-unit reflex-unit peer-intake-unit rfi-responder-unit wg-observer-unit nocturnal-probe-unit console admin-proxy admin-proxy-unit identity-render oauth2-env offline-review vault-health vault-heal \
         provenance-verify user-init provenance-append ingest precommit shims-check context-pack context-check governance-check \
         bundle wiki-preflight wiki-status wiki-lint wiki-query skills-sync skills-check vector-reindex vector-serve uplift-intake uplift-intake-unit uplift-intake-check distill distill-doctor distill-trainer-help distill-dataset distill-run distill-status resource-directory file-share-serve nat-status-serve share-ratify-unit share-ratify-serve share-ratify-list share-ratify-approve share-ratify-refuse issue-triage clean
 
@@ -344,6 +344,9 @@ admin-proxy: ## Master admin proxy (registry-only target, signed assertion)
 
 identity-render: ## Render the Master identity stack (Dex + lldap) into the state dir
 	@$(PY) "$(VAULT_ROOT)/scripts/sparknet-identity-render.py" --json
+
+oauth2-env: ## Render one node's oauth2-proxy env (IDENTITY_DIR=, NODE_ID=)
+	@$(PY) "$(VAULT_ROOT)/scripts/sparknet-oauth2-env.py" --identity-dir "$(IDENTITY_DIR)" --node-id "$(NODE_ID)" --json
 
 admin-proxy-unit: ## Stage the admin proxy unit ONLY (does not enable it)
 	@install -Dm644 "$(VAULT_ROOT)/systemd/sparknet-admin-proxy.service" "$(UNIT_DIR)/sparknet-admin-proxy.service"
