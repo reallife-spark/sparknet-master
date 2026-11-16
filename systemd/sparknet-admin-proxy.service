@@ -1,0 +1,36 @@
+# The Master admin proxy (loopback 8191) — the one-origin route to every node
+# auth gateway. nginx on 8088 sends `/nodes/<id>/...` here after its own
+# auth_request; the proxy resolves the node from the signed registry, signs a
+# short-lived sso-assertion with the Master node identity key, and forwards the
+# request over TLS. It accepts no caller-supplied target URL.
+#
+# Not enabled by `make units`. Staging it is an operator decision because it
+# carries the Master node identity key into a network-facing process. `make
+# admin-proxy-unit` stages the file. The key is read 0600 from the state dir and
+# is not the operational signing key.
+#
+# It grants no fabric capability and signs no registry entry or approval. See
+# contracts/sso-identity.md and ADR 0022.
+
+[Unit]
+Description=Sparknet Master admin proxy (registry-only, signed assertion, never authority)
+After=network-online.target sparknet-master-wireguard-anchor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.env
+Environment=SPARKNET_STATE_DIR=%h/.local/state/sparknet/master-node
+ExecStart=/usr/bin/env python3 %h/services/sparknet-admin-proxy.py --serve \
+    --bind 127.0.0.1 \
+    --port 8191 \
+    --registry %h/manifests/node-authorizations.json \
+    --key ${SPARKNET_STATE_DIR}/keys/ed25519-node.key.b64 \
+    --master-node-id ${SPARKNET_NODE_ID}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/sparknet/master-node

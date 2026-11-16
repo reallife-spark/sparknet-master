@@ -316,6 +316,14 @@ current: done
     code is `8580214`; the current master bundle rebuilt and verified. No
     services outside the delivered intake/triage/browser leg are claimed.
 
+## Fabric Step 113 pointer
+
+The federated admin identity and offline break-glass work is owned by fabric
+`PLAN.md` Step 113, `contracts/sso-identity.md` and ADR 0022. The Master-side
+services (identity provider, per-node OIDC clients, one-origin admin proxy,
+offline-repair reconciliation) are tracked there; do not duplicate the steps in
+this file.
+
 ## Next
 
 `current:` moves one step at a time, and only after the DoD is verified.

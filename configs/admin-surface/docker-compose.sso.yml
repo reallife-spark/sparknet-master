@@ -1,0 +1,38 @@
+# Federated admin ingress overlay for the Master (ADR 0022,
+# contracts/sso-identity.md).
+#
+# The existing 8088 admin surface stays as the rollback path. This overlay adds
+# a separate admin-only SSO ingress on 8092 (overlay) and loopback 8092, with
+# TLS + auth_request. `/nodes/<id>/...` is the one-origin route to a peer's
+# admin ingress through the Master proxy on 8191.
+#
+#   SPARKNET_IDENTITY_DIR=... docker compose -f docker-compose.admin.yml \
+#     -f docker-compose.sso.yml up -d
+services:
+  open-webui:
+    environment:
+      WEBUI_AUTH_TRUSTED_EMAIL_HEADER: "X-User-Email"
+      WEBUI_AUTH_TRUSTED_ROLE_HEADER: "X-User-Role"
+      WEBUI_AUTH_TRUSTED_GROUPS_HEADER: "X-User-Groups"
+      ENABLE_LOGIN_FORM: "true"
+      ENABLE_PASSWORD_AUTH: "true"
+
+  sso-nginx:
+    image: nginx:1.27-alpine
+    container_name: sparknet-master-sso-nginx
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SPARKNET_BIND: "10.100.0.1:8092"
+      SPARKNET_ADMIN_ALT_BIND: "127.0.0.1:8092"
+      SPARKNET_CONSOLE_UPSTREAM: "127.0.0.1:8098"
+      SPARKNET_WEBUI_PORT: "8080"
+      SPARKNET_TLS_CERT: "/etc/sparknet/identity/tls/server.crt"
+      SPARKNET_TLS_KEY: "/etc/sparknet/identity/tls/server.key"
+      SPARKNET_ADMIN_CA: "/etc/sparknet/identity/admin-ca/ca.crt"
+    volumes:
+      - ../../../webui/nginx.sso.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ../../../webui/console/sparknet-menu.js:/etc/nginx/sparknet-menu.js:ro
+      - ${SPARKNET_IDENTITY_DIR:?set SPARKNET_IDENTITY_DIR to the Master identity dir}:/etc/sparknet/identity:ro
+    depends_on:
+      - open-webui

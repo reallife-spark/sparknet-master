@@ -1,0 +1,42 @@
+# Master-hosted identity stack: Dex (OIDC) + lldap (directory).
+#
+# Render the mounted files first:
+#   master-node/scripts/sparknet-identity-render.py --json
+#
+# Then, with SPARKNET_IDENTITY_DIR pointing at the rendered directory
+# (default: $SPARKNET_STATE_DIR/identity):
+#   docker compose -f docker-compose.identity.yml up -d
+#
+# The issuer is overlay-only (10.100.0.1:9443). lldap is loopback-only; Dex
+# reaches it on 127.0.0.1:3890. No wildcard listener is declared.
+name: sparknet-identity
+
+services:
+  lldap:
+    image: lldap/lldap:${LLDAP_TAG:-v0.6.3}
+    container_name: sparknet-lldap
+    restart: unless-stopped
+    env_file:
+      - ${SPARKNET_IDENTITY_DIR:?set SPARKNET_IDENTITY_DIR to the rendered identity dir}/lldap.env
+    ports:
+      - "127.0.0.1:3890:3890"
+      - "127.0.0.1:17170:17170"
+    volumes:
+      - ${SPARKNET_IDENTITY_DIR:?}/lldap:/data
+
+  dex:
+    image: ghcr.io/dexidp/dex:${DEX_TAG:-v2.41.1}
+    container_name: sparknet-dex
+    restart: unless-stopped
+    # The rendered config and TLS key are 0600 on the host. Run Dex as the
+    # state-dir owner so it can read them without making a secret world-readable.
+    user: "${SPARKNET_DEX_UID:-1000}:${SPARKNET_DEX_GID:-1000}"
+    # Host networking is how Dex binds the overlay address from the rendered
+    # config. lldap is published on loopback, so Dex still reaches it locally.
+    network_mode: host
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ${SPARKNET_IDENTITY_DIR:?}/dex/config.yaml:/etc/dex/config.yaml:ro
+      - ${SPARKNET_IDENTITY_DIR:?}/tls:/etc/dex/tls:ro
+    depends_on:
+      - lldap
